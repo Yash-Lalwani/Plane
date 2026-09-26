@@ -5,3 +5,7 @@ coverage/
 backend/src/generated/
 .DS_Store
 *.log
+
+# Local project instructions, not published
+CLAUDE.md
+PRD.md
