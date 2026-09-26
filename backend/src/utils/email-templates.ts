@@ -26,3 +26,25 @@ export const passwordResetEmail = (
 <p><a href="${link}">Reset password</a></p>
 <p>If you did not ask for this, you can ignore this email.</p>`,
 });
+
+// Project names are user input, so they are escaped before going into HTML.
+const escapeHtml = (value: string): string =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
+export const invitationEmail = (
+  inviterUsername: string,
+  projectName: string,
+  role: string,
+  link: string,
+): EmailContent => ({
+  subject: `You're invited to join ${projectName} on Plane`,
+  text: `${inviterUsername} invited you to join the project "${projectName}" as ${role}.\n\nAccept the invitation by opening this link:\n${link}\n\nThe invitation expires in 7 days.`,
+  html: `<p>${inviterUsername} invited you to join the project <strong>${escapeHtml(projectName)}</strong> as ${role}.</p>
+<p><a href="${link}">View invitation</a></p>
+<p>The invitation expires in 7 days.</p>`,
+});
