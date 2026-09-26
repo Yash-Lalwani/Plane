@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { listActivity } from "../controllers/activity.controller.js";
+import { getDashboard } from "../controllers/dashboard.controller.js";
 import {
   createProject,
   deleteProject,
@@ -13,6 +15,7 @@ import {
 } from "../middlewares/auth.middleware.js";
 import { requireProjectRole } from "../middlewares/project-role.middleware.js";
 import { validate } from "../middlewares/validate.middleware.js";
+import { listActivityQuerySchema } from "../validators/activity.validator.js";
 import {
   createProjectSchema,
   projectParamsSchema,
@@ -47,6 +50,19 @@ projectRouter.delete(
   validate({ params: projectParamsSchema }),
   requireProjectRole(ProjectRole.ADMIN),
   deleteProject,
+);
+
+projectRouter.get(
+  "/:projectId/dashboard",
+  validate({ params: projectParamsSchema }),
+  requireProjectRole(),
+  getDashboard,
+);
+projectRouter.get(
+  "/:projectId/activity",
+  validate({ params: projectParamsSchema, query: listActivityQuerySchema }),
+  requireProjectRole(),
+  listActivity,
 );
 
 projectRouter.use("/:projectId/members", memberRouter);

@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { prisma } from "../config/db.js";
+import { logActivity } from "../utils/activity.js";
 import { ApiError } from "../utils/api-error.js";
 import { ApiResponse } from "../utils/api-response.js";
 import { publicUserSelect } from "../utils/selects.js";
@@ -43,6 +44,13 @@ export const createNote = async (
     data: { projectId, content, createdById: req.user.id },
     include: noteInclude,
   });
+  await logActivity({
+    projectId,
+    actorId: req.user.id,
+    action: "note.created",
+    entityType: "note",
+    entityId: note.id,
+  });
 
   res.status(201).json(new ApiResponse(201, note, "Note created successfully"));
 };
@@ -73,6 +81,13 @@ export const updateNote = async (
     data: { content },
     include: noteInclude,
   });
+  await logActivity({
+    projectId: note.projectId,
+    actorId: req.user.id,
+    action: "note.updated",
+    entityType: "note",
+    entityId: note.id,
+  });
 
   res
     .status(200)
@@ -86,6 +101,13 @@ export const deleteNote = async (
   const note = await findNoteOrThrow(req.params as NoteParams);
 
   await prisma.note.delete({ where: { id: note.id } });
+  await logActivity({
+    projectId: note.projectId,
+    actorId: req.user.id,
+    action: "note.deleted",
+    entityType: "note",
+    entityId: note.id,
+  });
 
   res.status(200).json(new ApiResponse(200, null, "Note deleted successfully"));
 };

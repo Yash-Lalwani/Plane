@@ -1,8 +1,10 @@
 import type { Request, Response } from "express";
 import { prisma } from "../config/db.js";
 import { ProjectRole } from "../generated/prisma/client.js";
+import { logActivity } from "../utils/activity.js";
 import { ApiError } from "../utils/api-error.js";
 import { ApiResponse } from "../utils/api-response.js";
+import { invalidateDashboardCache } from "../utils/cache.js";
 import { publicUserSelect } from "../utils/selects.js";
 import type {
   MemberParams,
@@ -13,6 +15,7 @@ import type { ProjectParams } from "../validators/project.validator.js";
 const findMemberOrThrow = async ({ projectId, userId }: MemberParams) => {
   const member = await prisma.projectMember.findUnique({
     where: { projectId_userId: { projectId, userId } },
+    include: { user: { select: { username: true } } },
   });
   if (!member) {
     throw new ApiError(404, "Member not found");
@@ -70,6 +73,15 @@ export const updateMemberRole = async (
     data: { role },
     select: { role: true, createdAt: true, user: { select: publicUserSelect } },
   });
+  await logActivity({
+    projectId: params.projectId,
+    actorId: req.user.id,
+    action: "member.role_changed",
+    entityType: "member",
+    entityId: params.userId,
+    metadata: { username: member.user.username, from: member.role, to: role },
+  });
+  await invalidateDashboardCache(params.projectId);
 
   res
     .status(200)
@@ -93,6 +105,15 @@ export const removeMember = async (
     }),
     prisma.projectMember.delete({ where: { id: member.id } }),
   ]);
+  await logActivity({
+    projectId: params.projectId,
+    actorId: req.user.id,
+    action: "member.removed",
+    entityType: "member",
+    entityId: params.userId,
+    metadata: { username: member.user.username },
+  });
+  await invalidateDashboardCache(params.projectId);
 
   res
     .status(200)

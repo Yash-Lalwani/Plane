@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { prisma } from "../config/db.js";
 import { ProjectRole } from "../generated/prisma/client.js";
+import { logActivity } from "../utils/activity.js";
 import { ApiResponse } from "../utils/api-response.js";
 import { deleteFile } from "../utils/file-storage.js";
 import { publicUserSelect } from "../utils/selects.js";
@@ -62,6 +63,14 @@ export const createProject = async (
     },
     include: projectInclude,
   });
+  await logActivity({
+    projectId: project.id,
+    actorId: req.user.id,
+    action: "project.created",
+    entityType: "project",
+    entityId: project.id,
+    metadata: { name: project.name },
+  });
 
   res
     .status(201)
@@ -107,6 +116,14 @@ export const updateProject = async (
     where: { id: projectId },
     data: { name, description },
     include: projectInclude,
+  });
+  await logActivity({
+    projectId,
+    actorId: req.user.id,
+    action: "project.updated",
+    entityType: "project",
+    entityId: projectId,
+    metadata: { name: project.name },
   });
 
   res

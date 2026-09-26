@@ -3,8 +3,10 @@ import { prisma } from "../config/db.js";
 import { env } from "../config/env.js";
 import { InvitationStatus } from "../generated/prisma/client.js";
 import { addEmailJob } from "../queues/email.queue.js";
+import { logActivity } from "../utils/activity.js";
 import { ApiError } from "../utils/api-error.js";
 import { ApiResponse } from "../utils/api-response.js";
+import { invalidateDashboardCache } from "../utils/cache.js";
 import { invitationEmail } from "../utils/email-templates.js";
 import { publicUserSelect } from "../utils/selects.js";
 import { createRandomToken, hashToken } from "../utils/tokens.js";
@@ -88,6 +90,14 @@ export const createInvitation = async (
     to: email,
     ...invitationEmail(req.user.username, project.name, role, link),
   });
+  await logActivity({
+    projectId,
+    actorId: req.user.id,
+    action: "invitation.sent",
+    entityType: "invitation",
+    entityId: invitation.id,
+    metadata: { email, role },
+  });
 
   res
     .status(201)
@@ -134,6 +144,14 @@ export const revokeInvitation = async (
     where: { id: invitation.id },
     data: { status: InvitationStatus.REVOKED },
     select: invitationSelect,
+  });
+  await logActivity({
+    projectId,
+    actorId: req.user.id,
+    action: "invitation.revoked",
+    entityType: "invitation",
+    entityId: invitation.id,
+    metadata: { email: invitation.email },
   });
 
   res
@@ -217,6 +235,15 @@ export const acceptInvitation = async (
       data: { status: InvitationStatus.ACCEPTED, acceptedAt: new Date() },
     }),
   ]);
+  await logActivity({
+    projectId: invitation.projectId,
+    actorId: req.user.id,
+    action: "member.joined",
+    entityType: "member",
+    entityId: req.user.id,
+    metadata: { username: req.user.username, role: invitation.role },
+  });
+  await invalidateDashboardCache(invitation.projectId);
 
   res
     .status(200)

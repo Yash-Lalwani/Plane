@@ -1,8 +1,10 @@
 import type { Request, Response } from "express";
 import { prisma } from "../config/db.js";
 import { type Prisma, TaskStatus } from "../generated/prisma/client.js";
+import { logActivity } from "../utils/activity.js";
 import { ApiError } from "../utils/api-error.js";
 import { ApiResponse } from "../utils/api-response.js";
+import { invalidateDashboardCache } from "../utils/cache.js";
 import { deleteFile } from "../utils/file-storage.js";
 import { findTaskOrThrow } from "../utils/find-task.js";
 import { buildPaginatedData, getSkipTake } from "../utils/pagination.js";
@@ -116,6 +118,15 @@ export const createTask = async (
   const task = await prisma.task.create({
     data: { ...input, projectId, createdById: req.user.id },
   });
+  await logActivity({
+    projectId,
+    actorId: req.user.id,
+    action: "task.created",
+    entityType: "task",
+    entityId: task.id,
+    metadata: { title: task.title },
+  });
+  await invalidateDashboardCache(projectId);
 
   res
     .status(201)
@@ -156,7 +167,24 @@ export const updateTask = async (
     await ensureAssigneeIsMember(projectId, input.assignedToId);
   }
 
-  await prisma.task.update({ where: { id: task.id }, data: input });
+  const updated = await prisma.task.update({
+    where: { id: task.id },
+    data: input,
+  });
+
+  // A status change gets its own action (with from/to) instead of task.updated.
+  const statusChanged = updated.status !== task.status;
+  await logActivity({
+    projectId,
+    actorId: req.user.id,
+    action: statusChanged ? "task.status_changed" : "task.updated",
+    entityType: "task",
+    entityId: task.id,
+    metadata: statusChanged
+      ? { title: updated.title, from: task.status, to: updated.status }
+      : { title: updated.title },
+  });
+  await invalidateDashboardCache(projectId);
 
   res
     .status(200)
@@ -183,6 +211,15 @@ export const deleteTask = async (
   });
 
   await prisma.task.delete({ where: { id: task.id } });
+  await logActivity({
+    projectId,
+    actorId: req.user.id,
+    action: "task.deleted",
+    entityType: "task",
+    entityId: task.id,
+    metadata: { title: task.title },
+  });
+  await invalidateDashboardCache(projectId);
 
   await Promise.all(
     attachments.map((attachment) =>
