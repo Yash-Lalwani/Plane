@@ -1,3 +1,6 @@
+# Full backend: docker compose up --build
+# Local development: docker compose up postgres redis, then npm run dev and npm run worker:dev.
+
 services:
   postgres:
     image: postgres:18-alpine
@@ -25,6 +28,35 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  api:
+    build: ./backend
+    env_file: ./backend/.env
+    # backend/.env points at localhost for local development; inside Compose the
+    # databases are reached by their service names.
+    environment:
+      DATABASE_URL: postgresql://plane:plane@postgres:5432/plane
+      REDIS_URL: redis://redis:6379
+    # exec replaces the shell, so Node is the main process and receives SIGTERM directly.
+    command: sh -c "npm run db:deploy && exec node dist/server.js"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://plane:plane@postgres:5432/plane
+      REDIS_URL: redis://redis:6379
+    command: node dist/workers/email.worker.js
+    depends_on:
+      redis:
+        condition: service_healthy
 
 volumes:
   postgres-data:

@@ -280,15 +280,15 @@ db:studio    prisma studio
 
 ## 9. Docker, CI and Deployment
 
-**`backend/Dockerfile`**: two stages. The build stage runs `npm ci`, `prisma generate` and `tsc`. The run stage uses `node:<lts>-slim`, production dependencies, `dist/` and `prisma/`. The same image runs both the API (`npm start`) and the worker (`npm run worker`).
+**`backend/Dockerfile`**: two stages. The build stage runs `npm ci`, `prisma generate` and `tsc`. The run stage uses `node:<lts>-slim`, production dependencies, `dist/` and `prisma/`. The same image runs both the API (`node dist/server.js`) and the worker (`node dist/workers/email.worker.js`). In containers, start Node directly, not through npm: npm as the main process does not pass `SIGTERM` on, so the worker would be killed before its graceful shutdown runs.
 
-**`docker-compose.yml`** (repo root): services `postgres` (with a volume), `redis`, `api` (runs `prisma migrate deploy` then starts, depends on postgres and redis), and `worker`. It reads `backend/.env`. For local development, running only `docker compose up postgres redis` and then `npm run dev` plus `npm run worker:dev` must also work.
+**`docker-compose.yml`** (repo root): services `postgres` (with a volume), `redis`, `api` (runs `prisma migrate deploy` then `exec node dist/server.js`, depends on postgres and redis), and `worker` (`node dist/workers/email.worker.js`). It reads `backend/.env`. For local development, running only `docker compose up postgres redis` and then `npm run dev` plus `npm run worker:dev` must also work.
 
 **`.github/workflows/ci.yml`**: on push and pull request, with Postgres and Redis service containers: `npm ci` → `prisma migrate deploy` → `lint` → `typecheck` → `test` → `build`. Working directory `backend`.
 
 **Railway** (documented in the README, not automated): two services from the same repo with root directory `backend`, plus Railway Postgres and Railway Redis.
-- API service: pre-deploy command `npm run db:deploy`, start command `npm start`.
-- Worker service: start command `npm run worker`.
+- API service: pre-deploy command `npm run db:deploy`, start command `node dist/server.js`.
+- Worker service: start command `node dist/workers/email.worker.js`.
 - Set `NODE_ENV=production`, `CLIENT_URL` and `CORS_ORIGIN` to the frontend URL once it exists.
 - Run the seed once against the production database.
 
