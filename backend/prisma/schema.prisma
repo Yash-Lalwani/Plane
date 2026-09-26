@@ -6,3 +6,206 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum ProjectRole {
+  ADMIN
+  PROJECT_ADMIN
+  MEMBER
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+// Declared from lowest to highest so sorting by priority follows this order.
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
+
+model User {
+  id                         String    @id @default(uuid()) @db.Uuid
+  email                      String    @unique
+  username                   String    @unique
+  fullName                   String?
+  passwordHash               String
+  avatarUrl                  String?
+  avatarPublicId             String?
+  isEmailVerified            Boolean   @default(false)
+  emailVerificationTokenHash String?   @unique
+  emailVerificationExpiry    DateTime?
+  passwordResetTokenHash     String?   @unique
+  passwordResetExpiry        DateTime?
+  refreshTokenHash           String?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  createdProjects Project[]           @relation("ProjectCreator")
+  memberships     ProjectMember[]
+  sentInvitations ProjectInvitation[]
+  assignedTasks   Task[]              @relation("TaskAssignee")
+  createdTasks    Task[]              @relation("TaskCreator")
+  createdSubtasks Subtask[]
+  attachments     Attachment[]
+  comments        Comment[]
+  notes           Note[]
+  activities      ActivityLog[]
+}
+
+model Project {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  description String?
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy   User                @relation("ProjectCreator", fields: [createdById], references: [id])
+  members     ProjectMember[]
+  invitations ProjectInvitation[]
+  tasks       Task[]
+  notes       Note[]
+  activities  ActivityLog[]
+}
+
+model ProjectMember {
+  id        String      @id @default(uuid()) @db.Uuid
+  projectId String      @db.Uuid
+  userId    String      @db.Uuid
+  role      ProjectRole
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model ProjectInvitation {
+  id          String           @id @default(uuid()) @db.Uuid
+  projectId   String           @db.Uuid
+  email       String
+  role        ProjectRole
+  tokenHash   String           @unique
+  status      InvitationStatus @default(PENDING)
+  invitedById String           @db.Uuid
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  invitedBy User    @relation(fields: [invitedById], references: [id])
+
+  @@index([projectId, email])
+}
+
+model Task {
+  id           String       @id @default(uuid()) @db.Uuid
+  projectId    String       @db.Uuid
+  title        String
+  description  String?
+  status       TaskStatus   @default(TODO)
+  priority     TaskPriority @default(MEDIUM)
+  dueDate      DateTime?
+  assignedToId String?      @db.Uuid
+  createdById  String       @db.Uuid
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignedTo  User?        @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  createdBy   User         @relation("TaskCreator", fields: [createdById], references: [id])
+  subtasks    Subtask[]
+  attachments Attachment[]
+  comments    Comment[]
+
+  @@index([projectId, status])
+}
+
+model Subtask {
+  id          String   @id @default(uuid()) @db.Uuid
+  taskId      String   @db.Uuid
+  title       String
+  isCompleted Boolean  @default(false)
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  task      Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  createdBy User @relation(fields: [createdById], references: [id])
+
+  @@index([taskId])
+}
+
+model Attachment {
+  id           String   @id @default(uuid()) @db.Uuid
+  taskId       String   @db.Uuid
+  url          String
+  publicId     String
+  fileName     String
+  mimeType     String
+  size         Int
+  uploadedById String   @db.Uuid
+  createdAt    DateTime @default(now())
+
+  task       Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy User @relation(fields: [uploadedById], references: [id])
+
+  @@index([taskId])
+}
+
+model Comment {
+  id        String   @id @default(uuid()) @db.Uuid
+  taskId    String   @db.Uuid
+  authorId  String   @db.Uuid
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id])
+
+  @@index([taskId, createdAt])
+}
+
+model Note {
+  id          String   @id @default(uuid()) @db.Uuid
+  projectId   String   @db.Uuid
+  content     String
+  createdById String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User    @relation(fields: [createdById], references: [id])
+
+  @@index([projectId])
+}
+
+model ActivityLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  projectId  String   @db.Uuid
+  actorId    String   @db.Uuid
+  action     String
+  entityType String
+  entityId   String   @db.Uuid
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  actor   User    @relation(fields: [actorId], references: [id])
+
+  @@index([projectId, createdAt])
+}
