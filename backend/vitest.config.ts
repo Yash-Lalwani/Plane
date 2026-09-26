@@ -6,6 +6,8 @@ export default defineConfig({
     environment: "node",
     env: testEnv,
     globalSetup: ["./tests/global-setup.ts"],
+    setupFiles: ["./tests/setup.ts"],
+    clearMocks: true,
     // All test files share one database, so they must not run at the same time.
     fileParallelism: false,
   },

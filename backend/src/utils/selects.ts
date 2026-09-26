@@ -11,3 +11,7 @@ export const publicUserSelect = {
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.UserSelect;
+
+export type PublicUser = Prisma.UserGetPayload<{
+  select: typeof publicUserSelect;
+}>;

@@ -10,6 +10,10 @@ import { router } from "./routes/index.js";
 
 export const app = express();
 
+// Railway (and most hosts) put the app behind one proxy. Trusting it makes req.ip the real
+// client IP, which the rate limiter needs to tell clients apart.
+app.set("trust proxy", 1);
+
 app.use(helmet());
 app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
 app.use(express.json({ limit: "100kb" }));
