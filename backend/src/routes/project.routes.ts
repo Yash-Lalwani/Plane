@@ -20,6 +20,7 @@ import {
 } from "../validators/project.validator.js";
 import { projectInvitationRouter } from "./invitation.routes.js";
 import { memberRouter } from "./member.routes.js";
+import { taskRouter } from "./task.routes.js";
 
 export const projectRouter = Router();
 
@@ -49,3 +50,4 @@ projectRouter.delete(
 
 projectRouter.use("/:projectId/members", memberRouter);
 projectRouter.use("/:projectId/invitations", projectInvitationRouter);
+projectRouter.use("/:projectId/tasks", taskRouter);
