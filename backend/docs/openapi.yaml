@@ -1,0 +1,2430 @@
+openapi: 3.0.3
+info:
+  title: Plane API
+  version: 1.0.0
+  description: |
+    REST API for Plane, a collaborative project management platform.
+
+    **Authentication.** `POST /auth/login` sets `accessToken` and `refreshToken` as httpOnly
+    cookies and also returns both tokens in the body. Browsers send the cookies automatically.
+    In Swagger UI, copy `accessToken` from the login response, click **Authorize** and paste it
+    under `bearerAuth`.
+
+    **Email verification.** Every project-related endpoint returns `403` until the user's email
+    is verified.
+
+    **Responses.** Successful responses are wrapped as `{ statusCode, data, message, success }`.
+    Errors are `{ statusCode, message, errors, success: false }`.
+servers:
+  - url: /api/v1
+
+tags:
+  - name: Health
+  - name: Auth
+  - name: Users
+  - name: Projects
+  - name: Members
+  - name: Invitations
+  - name: Tasks
+  - name: Attachments
+  - name: Subtasks
+  - name: Comments
+  - name: Notes
+
+security:
+  - cookieAuth: []
+  - bearerAuth: []
+
+paths:
+  /healthcheck:
+    get:
+      tags: [Health]
+      summary: Check API, database and Redis status
+      security: []
+      responses:
+        "200":
+          description: Database and Redis are reachable
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/Health"
+                      message:
+                        example: Service is healthy
+        "503":
+          description: Database or Redis is unreachable
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      statusCode:
+                        example: 503
+                      data:
+                        $ref: "#/components/schemas/Health"
+                      message:
+                        example: Service is unhealthy
+                      success:
+                        example: false
+              example:
+                statusCode: 503
+                data: { api: up, database: up, redis: down }
+                message: Service is unhealthy
+                success: false
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new account
+      description: Creates the user and queues a verification email. Rate limited.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User registered
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      statusCode:
+                        example: 201
+                      data:
+                        $ref: "#/components/schemas/User"
+                      message:
+                        example: Registered successfully. Please verify your email.
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in
+      description: Sets the token cookies and returns both tokens in the body. Rate limited.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Logged in
+          headers:
+            Set-Cookie:
+              description: "`accessToken` and `refreshToken`, both httpOnly"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/LoginResult"
+                      message:
+                        example: Logged in successfully
+        "401":
+          description: Wrong email or password (same message for both)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                statusCode: 401
+                message: Invalid email or password
+                errors: []
+                success: false
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Log out
+      description: Clears the cookies and the stored refresh token.
+      responses:
+        "200":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/current-user:
+    get:
+      tags: [Auth]
+      summary: Get the logged-in user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/User"
+                      message:
+                        example: Current user fetched successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/refresh-token:
+    post:
+      tags: [Auth]
+      summary: Get a new access token
+      description: |
+        Reads the refresh token from the `refreshToken` cookie or the request body. Issues a new
+        token pair and rotates the refresh token: the old one stops working.
+      security: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/AuthTokens"
+                      message:
+                        example: Access token refreshed
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/verify-email/{token}:
+    post:
+      tags: [Auth]
+      summary: Verify an email address
+      description: Uses the token from the verification email. Tokens expire after 20 minutes.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Token"
+      responses:
+        "200":
+          description: Email verified
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          isEmailVerified:
+                            type: boolean
+                            example: true
+                      message:
+                        example: Email verified successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /auth/resend-email-verification:
+    post:
+      tags: [Auth]
+      summary: Send a new verification email
+      description: For logged-in users whose email is not verified yet. Rate limited.
+      responses:
+        "200":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password reset email
+      description: Always returns the same response, whether or not the email exists. Rate limited.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: Same response for known and unknown emails
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NullDataResponse"
+              example:
+                statusCode: 200
+                data: null
+                message: If an account with that email exists, a reset link has been sent
+                success: true
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /auth/reset-password/{token}:
+    post:
+      tags: [Auth]
+      summary: Set a new password
+      description: |
+        Uses the token from the reset email (expires after 20 minutes). Also logs out every
+        existing session.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Token"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change the password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /users/me:
+    patch:
+      tags: [Users]
+      summary: Update the profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/User"
+                      message:
+                        example: Profile updated successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /users/me/avatar:
+    patch:
+      tags: [Users]
+      summary: Upload or replace the avatar
+      description: JPEG, PNG or WEBP, up to 2 MB. The previous avatar is deleted.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [avatar]
+              properties:
+                avatar:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Updated user with the new avatar URL
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/User"
+                      message:
+                        example: Avatar updated successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List the user's projects
+      responses:
+        "200":
+          description: Projects the user belongs to, with their role and the member count
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Project"
+                      message:
+                        example: Projects fetched successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+    post:
+      tags: [Projects]
+      summary: Create a project
+      description: The creator becomes the project's Admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+      responses:
+        "201":
+          description: Created project
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      statusCode:
+                        example: 201
+                      data:
+                        $ref: "#/components/schemas/Project"
+                      message:
+                        example: Project created successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Projects]
+      summary: Get a project
+      description: Any member.
+      responses:
+        "200":
+          description: Project with the user's role and the member count
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/Project"
+                      message:
+                        example: Project fetched successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    patch:
+      tags: [Projects]
+      summary: Update a project
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProjectRequest"
+      responses:
+        "200":
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/Project"
+                      message:
+                        example: Project updated successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      tags: [Projects]
+      summary: Delete a project
+      description: |
+        Admin only. Deletes all members, invitations, tasks, subtasks, attachments, comments,
+        notes and activity, and removes attachment files from Cloudinary.
+      responses:
+        "200":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectId}/dashboard:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Projects]
+      summary: Get the project dashboard
+      description: Any member. Cached in Redis for 60 seconds and refreshed when tasks or members change.
+      responses:
+        "200":
+          description: Task and member counts
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/Dashboard"
+                      message:
+                        example: Dashboard fetched successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectId}/activity:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Projects]
+      summary: Get the project activity feed
+      description: Any member. Newest first.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Paginated activity entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Activity"
+                          pagination:
+                            $ref: "#/components/schemas/Pagination"
+                      message:
+                        example: Activity fetched successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/members:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Members]
+      summary: List project members
+      description: Any member.
+      responses:
+        "200":
+          description: Members with their role
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Member"
+                      message:
+                        example: Members fetched successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectId}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/UserId"
+    patch:
+      tags: [Members]
+      summary: Change a member's role
+      description: Admin only. The last Admin cannot be demoted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMemberRoleRequest"
+      responses:
+        "200":
+          description: Member with the new role
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/Member"
+                      message:
+                        example: Member role updated successfully
+        "400":
+          $ref: "#/components/responses/LastAdmin"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      tags: [Members]
+      summary: Remove a member
+      description: Admin only. The member's tasks in this project become unassigned. The last Admin cannot be removed.
+      responses:
+        "200":
+          $ref: "#/components/responses/NoContent"
+        "400":
+          $ref: "#/components/responses/LastAdmin"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectId}/invitations:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      tags: [Invitations]
+      summary: Invite someone by email
+      description: |
+        Admin only. The email does not need an existing account. An invitation email with a
+        7-day link is queued.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInvitationRequest"
+      responses:
+        "201":
+          description: Invitation created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      statusCode:
+                        example: 201
+                      data:
+                        $ref: "#/components/schemas/Invitation"
+                      message:
+                        example: Invitation sent successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Already a member, or a pending invitation already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                statusCode: 409
+                message: A pending invitation already exists for this email
+                errors: []
+                success: false
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    get:
+      tags: [Invitations]
+      summary: List pending invitations
+      description: Admin only. Includes expired pending invitations; check `expiresAt`.
+      responses:
+        "200":
+          description: Pending invitations
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Invitation"
+                      message:
+                        example: Invitations fetched successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectId}/invitations/{invitationId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - name: invitationId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Invitations]
+      summary: Revoke an invitation
+      description: Admin only. Only pending invitations can be revoked.
+      responses:
+        "200":
+          description: Revoked invitation
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/Invitation"
+                      message:
+                        example: Invitation revoked successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /invitations/{token}:
+    parameters:
+      - $ref: "#/components/parameters/Token"
+    get:
+      tags: [Invitations]
+      summary: Preview an invitation
+      description: Public. Lets the frontend show who invited the user to which project.
+      security: []
+      responses:
+        "200":
+          description: Invitation details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/InvitationPreview"
+                      message:
+                        example: Invitation fetched successfully
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /invitations/{token}/accept:
+    parameters:
+      - $ref: "#/components/parameters/Token"
+    post:
+      tags: [Invitations]
+      summary: Accept an invitation
+      description: |
+        The logged-in user must have a verified email that matches the invited email.
+        Creates the membership and marks the invitation accepted.
+      responses:
+        "200":
+          description: Joined the project
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/AcceptedInvitation"
+                      message:
+                        example: Invitation accepted
+        "400":
+          description: The invitation is expired, revoked or already accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                statusCode: 400
+                message: This invitation has expired
+                errors: []
+                success: false
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Email not verified, or it does not match the invited email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                statusCode: 403
+                message: This invitation was sent to a different email address
+                errors: []
+                success: false
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /projects/{projectId}/tasks:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Tasks]
+      summary: List tasks
+      description: Any member.
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/TaskStatus"
+        - name: priority
+          in: query
+          schema:
+            $ref: "#/components/schemas/TaskPriority"
+        - name: assignedTo
+          in: query
+          description: A user id, or `me` for the logged-in user
+          schema:
+            type: string
+          example: me
+        - name: overdue
+          in: query
+          description: "`true` returns tasks with a past due date that are not DONE"
+          schema:
+            type: string
+            enum: ["true", "false"]
+        - name: search
+          in: query
+          description: Case-insensitive match on the title
+          schema:
+            type: string
+          example: login
+        - name: sortBy
+          in: query
+          schema:
+            type: string
+            enum: [createdAt, dueDate, priority]
+            default: createdAt
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Paginated tasks
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Task"
+                          pagination:
+                            $ref: "#/components/schemas/Pagination"
+                      message:
+                        example: Tasks fetched successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    post:
+      tags: [Tasks]
+      summary: Create a task
+      description: Admin or Project Admin. The assignee must be a project member.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTaskRequest"
+      responses:
+        "201":
+          description: Created task
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      statusCode:
+                        example: 201
+                      data:
+                        $ref: "#/components/schemas/TaskDetail"
+                      message:
+                        example: Task created successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/tasks/{taskId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      tags: [Tasks]
+      summary: Get a task
+      description: Any member. Includes subtasks, attachments and the comment count.
+      responses:
+        "200":
+          description: Task details
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/TaskDetail"
+                      message:
+                        example: Task fetched successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    patch:
+      tags: [Tasks]
+      summary: Update a task
+      description: Admin or Project Admin. Send `null` to clear the description, due date or assignee.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTaskRequest"
+      responses:
+        "200":
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/TaskDetail"
+                      message:
+                        example: Task updated successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      tags: [Tasks]
+      summary: Delete a task
+      description: Admin or Project Admin. Also removes its attachment files from Cloudinary.
+      responses:
+        "200":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectId}/tasks/{taskId}/attachments:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      tags: [Attachments]
+      summary: Upload attachments
+      description: |
+        Admin or Project Admin. Up to 5 files, 5 MB each. Allowed types: JPEG, PNG, WEBP, PDF,
+        plain text.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  maxItems: 5
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        "201":
+          description: Stored attachments
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      statusCode:
+                        example: 201
+                      data:
+                        type: array
+                        items:
+                          allOf:
+                            - $ref: "#/components/schemas/Attachment"
+                            - type: object
+                              properties:
+                                uploadedBy:
+                                  $ref: "#/components/schemas/User"
+                      message:
+                        example: Attachments uploaded successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+
+  /projects/{projectId}/tasks/{taskId}/attachments/{attachmentId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+      - name: attachmentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    delete:
+      tags: [Attachments]
+      summary: Delete an attachment
+      description: Admin or Project Admin. Also removes the file from Cloudinary.
+      responses:
+        "200":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectId}/tasks/{taskId}/subtasks:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    post:
+      tags: [Subtasks]
+      summary: Create a subtask
+      description: Admin or Project Admin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSubtaskRequest"
+      responses:
+        "201":
+          description: Created subtask
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      statusCode:
+                        example: 201
+                      data:
+                        $ref: "#/components/schemas/Subtask"
+                      message:
+                        example: Subtask created successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/tasks/{taskId}/subtasks/{subtaskId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+      - name: subtaskId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [Subtasks]
+      summary: Update a subtask
+      description: |
+        Any member may change `isCompleted`. Only Admins and Project Admins may change `title`;
+        a Member sending `title` gets `403`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSubtaskRequest"
+      responses:
+        "200":
+          description: Updated subtask
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/Subtask"
+                      message:
+                        example: Subtask updated successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      tags: [Subtasks]
+      summary: Delete a subtask
+      description: Admin or Project Admin.
+      responses:
+        "200":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectId}/tasks/{taskId}/comments:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+    get:
+      tags: [Comments]
+      summary: List comments
+      description: Any member. Oldest first.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Paginated comments
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              $ref: "#/components/schemas/Comment"
+                          pagination:
+                            $ref: "#/components/schemas/Pagination"
+                      message:
+                        example: Comments fetched successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    post:
+      tags: [Comments]
+      summary: Add a comment
+      description: Any member.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentRequest"
+      responses:
+        "201":
+          description: Created comment
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      statusCode:
+                        example: 201
+                      data:
+                        $ref: "#/components/schemas/Comment"
+                      message:
+                        example: Comment added successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/tasks/{taskId}/comments/{commentId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TaskId"
+      - name: commentId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [Comments]
+      summary: Edit a comment
+      description: The author only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentRequest"
+      responses:
+        "200":
+          description: Updated comment
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/Comment"
+                      message:
+                        example: Comment updated successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      tags: [Comments]
+      summary: Delete a comment
+      description: The author or a project Admin.
+      responses:
+        "200":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /projects/{projectId}/notes:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [Notes]
+      summary: List notes
+      description: Any member. Newest first.
+      responses:
+        "200":
+          description: Project notes
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Note"
+                      message:
+                        example: Notes fetched successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [Notes]
+      summary: Create a note
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentRequest"
+      responses:
+        "201":
+          description: Created note
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      statusCode:
+                        example: 201
+                      data:
+                        $ref: "#/components/schemas/Note"
+                      message:
+                        example: Note created successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+
+  /projects/{projectId}/notes/{noteId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectId"
+      - name: noteId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [Notes]
+      summary: Get a note
+      description: Any member.
+      responses:
+        "200":
+          description: Note
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/Note"
+                      message:
+                        example: Note fetched successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [Notes]
+      summary: Update a note
+      description: Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContentRequest"
+      responses:
+        "200":
+          description: Updated note
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ApiResponse"
+                  - properties:
+                      data:
+                        $ref: "#/components/schemas/Note"
+                      message:
+                        example: Note updated successfully
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+    delete:
+      tags: [Notes]
+      summary: Delete a note
+      description: Admin only.
+      responses:
+        "200":
+          $ref: "#/components/responses/NoContent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: accessToken
+      description: Set automatically by `POST /auth/login`. Used by browsers.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: The `accessToken` returned by `POST /auth/login` or `POST /auth/refresh-token`.
+
+  parameters:
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 16fd2706-8baf-433b-82eb-8c7fada847da
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: 9b2c1f4e-3a7d-4e8b-b6c5-1d2e3f4a5b6c
+    Token:
+      name: token
+      in: path
+      required: true
+      description: The raw token from the email link
+      schema:
+        type: string
+      example: 5f4dcc3b5aa765d61d8327deb882cf99e3b0c44298fc1c149afbf4c8996fb924
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    NoContent:
+      description: Success with no data
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/NullDataResponse"
+    BadRequest:
+      description: The request cannot be applied (for example an invalid or expired token)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            statusCode: 400
+            message: Verification link is invalid or has expired
+            errors: []
+            success: false
+    LastAdmin:
+      description: The change would leave the project without an Admin
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            statusCode: 400
+            message: A project must have at least one Admin
+            errors: []
+            success: false
+    Unauthorized:
+      description: Missing, invalid or expired token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            statusCode: 401
+            message: Unauthorized request
+            errors: []
+            success: false
+    Forbidden:
+      description: Email not verified, or the user's role does not allow this action
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            statusCode: 403
+            message: You do not have permission to perform this action
+            errors: []
+            success: false
+    NotFound:
+      description: Not found. Also returned for projects the user is not a member of.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            statusCode: 404
+            message: Project not found
+            errors: []
+            success: false
+    Conflict:
+      description: Conflicts with existing data
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            statusCode: 409
+            message: Email is already registered
+            errors: []
+            success: false
+    PayloadTooLarge:
+      description: A file is larger than allowed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            statusCode: 413
+            message: File is too large
+            errors: []
+            success: false
+    ValidationError:
+      description: The body, params or query failed validation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            statusCode: 422
+            message: Validation failed
+            errors:
+              - field: email
+                message: Invalid email address
+            success: false
+    TooManyRequests:
+      description: Rate limit reached (10 requests per 15 minutes per IP)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            statusCode: 429
+            message: Too many requests, please try again later
+            errors: []
+            success: false
+
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        statusCode:
+          type: integer
+          example: 200
+        data:
+          description: The response payload
+        message:
+          type: string
+        success:
+          type: boolean
+          example: true
+    NullDataResponse:
+      type: object
+      properties:
+        statusCode:
+          type: integer
+          example: 200
+        data:
+          type: object
+          nullable: true
+          example: null
+        message:
+          type: string
+          example: Deleted successfully
+        success:
+          type: boolean
+          example: true
+    ErrorResponse:
+      type: object
+      properties:
+        statusCode:
+          type: integer
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+        success:
+          type: boolean
+          example: false
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 57
+        totalPages:
+          type: integer
+          example: 3
+
+    ProjectRole:
+      type: string
+      enum: [ADMIN, PROJECT_ADMIN, MEMBER]
+      example: MEMBER
+    TaskStatus:
+      type: string
+      enum: [TODO, IN_PROGRESS, DONE]
+      example: TODO
+    TaskPriority:
+      type: string
+      enum: [LOW, MEDIUM, HIGH]
+      example: MEDIUM
+    InvitationStatus:
+      type: string
+      enum: [PENDING, ACCEPTED, REVOKED]
+      example: PENDING
+
+    Health:
+      type: object
+      properties:
+        api:
+          type: string
+          example: up
+        database:
+          type: string
+          enum: [up, down]
+          example: up
+        redis:
+          type: string
+          enum: [up, down]
+          example: up
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 9b2c1f4e-3a7d-4e8b-b6c5-1d2e3f4a5b6c
+        email:
+          type: string
+          format: email
+          example: demo@plane.dev
+        username:
+          type: string
+          example: demo
+        fullName:
+          type: string
+          nullable: true
+          example: Demo User
+        avatarUrl:
+          type: string
+          nullable: true
+          example: https://res.cloudinary.com/demo/image/upload/plane/avatars/abc123.png
+        isEmailVerified:
+          type: boolean
+          example: true
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-01T10:00:00.000Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-09-01T10:00:00.000Z"
+    AuthTokens:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5YjJjMWY0ZSJ9.signature
+        refreshToken:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5YjJjMWY0ZSIsImp0aSI6IjEifQ.signature
+    LoginResult:
+      allOf:
+        - type: object
+          properties:
+            user:
+              $ref: "#/components/schemas/User"
+        - $ref: "#/components/schemas/AuthTokens"
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        name:
+          type: string
+          example: Website Relaunch
+        description:
+          type: string
+          nullable: true
+          example: New marketing site for the Q4 launch
+        createdById:
+          type: string
+          format: uuid
+          example: 9b2c1f4e-3a7d-4e8b-b6c5-1d2e3f4a5b6c
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-01T10:00:00.000Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-09-01T10:00:00.000Z"
+        createdBy:
+          $ref: "#/components/schemas/User"
+        role:
+          $ref: "#/components/schemas/ProjectRole"
+        memberCount:
+          type: integer
+          example: 4
+    Member:
+      type: object
+      properties:
+        role:
+          $ref: "#/components/schemas/ProjectRole"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-02T09:30:00.000Z"
+        user:
+          $ref: "#/components/schemas/User"
+
+    Invitation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 2a1b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+        projectId:
+          type: string
+          format: uuid
+          example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        email:
+          type: string
+          format: email
+          example: teammate@example.com
+        role:
+          $ref: "#/components/schemas/ProjectRole"
+        status:
+          $ref: "#/components/schemas/InvitationStatus"
+        expiresAt:
+          type: string
+          format: date-time
+          example: "2026-09-09T10:00:00.000Z"
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-02T10:00:00.000Z"
+        invitedBy:
+          $ref: "#/components/schemas/User"
+    InvitationPreview:
+      type: object
+      properties:
+        project:
+          $ref: "#/components/schemas/ProjectRef"
+        invitedBy:
+          $ref: "#/components/schemas/User"
+        email:
+          type: string
+          format: email
+          example: teammate@example.com
+        role:
+          $ref: "#/components/schemas/ProjectRole"
+        status:
+          $ref: "#/components/schemas/InvitationStatus"
+        expiresAt:
+          type: string
+          format: date-time
+          example: "2026-09-09T10:00:00.000Z"
+    AcceptedInvitation:
+      type: object
+      properties:
+        projectId:
+          type: string
+          format: uuid
+          example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        role:
+          $ref: "#/components/schemas/ProjectRole"
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-03T12:00:00.000Z"
+        project:
+          $ref: "#/components/schemas/ProjectRef"
+    ProjectRef:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        name:
+          type: string
+          example: Website Relaunch
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 16fd2706-8baf-433b-82eb-8c7fada847da
+        projectId:
+          type: string
+          format: uuid
+          example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        title:
+          type: string
+          example: Design the pricing page
+        description:
+          type: string
+          nullable: true
+          example: Three tiers, annual toggle
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        priority:
+          $ref: "#/components/schemas/TaskPriority"
+        dueDate:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-10-15T00:00:00.000Z"
+        assignedToId:
+          type: string
+          format: uuid
+          nullable: true
+          example: 9b2c1f4e-3a7d-4e8b-b6c5-1d2e3f4a5b6c
+        createdById:
+          type: string
+          format: uuid
+          example: 9b2c1f4e-3a7d-4e8b-b6c5-1d2e3f4a5b6c
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-02T11:00:00.000Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-09-02T11:00:00.000Z"
+        assignedTo:
+          type: object
+          allOf:
+            - $ref: "#/components/schemas/User"
+          nullable: true
+        createdBy:
+          $ref: "#/components/schemas/User"
+    TaskDetail:
+      allOf:
+        - $ref: "#/components/schemas/Task"
+        - type: object
+          properties:
+            subtasks:
+              type: array
+              items:
+                $ref: "#/components/schemas/Subtask"
+            attachments:
+              type: array
+              items:
+                $ref: "#/components/schemas/Attachment"
+            commentCount:
+              type: integer
+              example: 3
+    Subtask:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 4d3c2b1a-6f5e-4d7c-9b8a-1a2b3c4d5e6f
+        taskId:
+          type: string
+          format: uuid
+          example: 16fd2706-8baf-433b-82eb-8c7fada847da
+        title:
+          type: string
+          example: Draft copy for each tier
+        isCompleted:
+          type: boolean
+          example: false
+        createdById:
+          type: string
+          format: uuid
+          example: 9b2c1f4e-3a7d-4e8b-b6c5-1d2e3f4a5b6c
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-02T11:05:00.000Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-09-02T11:05:00.000Z"
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 8e7d6c5b-4a3f-4e2d-8c1b-0a9f8e7d6c5b
+        taskId:
+          type: string
+          format: uuid
+          example: 16fd2706-8baf-433b-82eb-8c7fada847da
+        url:
+          type: string
+          example: https://res.cloudinary.com/demo/image/upload/plane/attachments/k2j3h4.pdf
+        publicId:
+          type: string
+          example: plane/attachments/k2j3h4
+        fileName:
+          type: string
+          example: pricing-spec.pdf
+        mimeType:
+          type: string
+          example: application/pdf
+        size:
+          type: integer
+          description: Size in bytes
+          example: 48213
+        uploadedById:
+          type: string
+          format: uuid
+          example: 9b2c1f4e-3a7d-4e8b-b6c5-1d2e3f4a5b6c
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-02T11:10:00.000Z"
+    Comment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b
+        taskId:
+          type: string
+          format: uuid
+          example: 16fd2706-8baf-433b-82eb-8c7fada847da
+        authorId:
+          type: string
+          format: uuid
+          example: 9b2c1f4e-3a7d-4e8b-b6c5-1d2e3f4a5b6c
+        content:
+          type: string
+          example: Can we add a FAQ section below the tiers?
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-02T12:00:00.000Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-09-02T12:00:00.000Z"
+        author:
+          $ref: "#/components/schemas/User"
+    Note:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 6a5b4c3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d
+        projectId:
+          type: string
+          format: uuid
+          example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        content:
+          type: string
+          example: Launch checklist lives in the shared drive.
+        createdById:
+          type: string
+          format: uuid
+          example: 9b2c1f4e-3a7d-4e8b-b6c5-1d2e3f4a5b6c
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-02T13:00:00.000Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-09-02T13:00:00.000Z"
+        createdBy:
+          $ref: "#/components/schemas/User"
+    Activity:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 3b4c5d6e-7f8a-4b9c-8d0e-1f2a3b4c5d6e
+        projectId:
+          type: string
+          format: uuid
+          example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+        actorId:
+          type: string
+          format: uuid
+          example: 9b2c1f4e-3a7d-4e8b-b6c5-1d2e3f4a5b6c
+        action:
+          type: string
+          enum:
+            - project.created
+            - project.updated
+            - member.joined
+            - member.role_changed
+            - member.removed
+            - invitation.sent
+            - invitation.revoked
+            - task.created
+            - task.updated
+            - task.status_changed
+            - task.deleted
+            - note.created
+            - note.updated
+            - note.deleted
+          example: task.status_changed
+        entityType:
+          type: string
+          enum: [project, member, invitation, task, note]
+          example: task
+        entityId:
+          type: string
+          format: uuid
+          example: 16fd2706-8baf-433b-82eb-8c7fada847da
+        metadata:
+          type: object
+          nullable: true
+          example:
+            title: Design the pricing page
+            from: IN_PROGRESS
+            to: DONE
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-09-03T15:00:00.000Z"
+        actor:
+          $ref: "#/components/schemas/User"
+    Dashboard:
+      type: object
+      properties:
+        totalTasks:
+          type: integer
+          example: 12
+        tasksByStatus:
+          type: object
+          properties:
+            TODO:
+              type: integer
+              example: 5
+            IN_PROGRESS:
+              type: integer
+              example: 4
+            DONE:
+              type: integer
+              example: 3
+        tasksByPriority:
+          type: object
+          properties:
+            LOW:
+              type: integer
+              example: 2
+            MEDIUM:
+              type: integer
+              example: 6
+            HIGH:
+              type: integer
+              example: 4
+        overdueTasks:
+          type: integer
+          example: 2
+        openTasksByAssignee:
+          type: array
+          description: Members with at least one task that is not DONE, most open tasks first
+          items:
+            type: object
+            properties:
+              user:
+                $ref: "#/components/schemas/User"
+              openTasks:
+                type: integer
+                example: 4
+        memberCount:
+          type: integer
+          example: 4
+
+    RegisterRequest:
+      type: object
+      required: [email, username, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: jane@example.com
+        username:
+          type: string
+          minLength: 3
+          maxLength: 30
+          pattern: "^[a-z0-9_]+$"
+          description: Lowercased before saving
+          example: jane_doe
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+          example: password123
+        fullName:
+          type: string
+          maxLength: 100
+          example: Jane Doe
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: demo@plane.dev
+        password:
+          type: string
+          example: DemoPass123!
+    RefreshTokenRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+          description: Only needed when the refreshToken cookie is not sent
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI5YjJjMWY0ZSIsImp0aSI6IjEifQ.signature
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+          example: jane@example.com
+    ResetPasswordRequest:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+          example: new-password-123
+    ChangePasswordRequest:
+      type: object
+      required: [oldPassword, newPassword]
+      properties:
+        oldPassword:
+          type: string
+          example: password123
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 72
+          example: new-password-123
+    UpdateProfileRequest:
+      type: object
+      description: Send at least one field. `fullName` null clears it.
+      properties:
+        fullName:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Jane Q. Doe
+        username:
+          type: string
+          minLength: 3
+          maxLength: 30
+          pattern: "^[a-z0-9_]+$"
+          example: jane_q
+    CreateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+          example: Website Relaunch
+        description:
+          type: string
+          maxLength: 1000
+          example: New marketing site for the Q4 launch
+    UpdateProjectRequest:
+      type: object
+      description: Send at least one field. `description` null clears it.
+      properties:
+        name:
+          type: string
+          maxLength: 100
+          example: Website Relaunch 2.0
+        description:
+          type: string
+          nullable: true
+          maxLength: 1000
+          example: Scope now includes the blog
+    UpdateMemberRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          $ref: "#/components/schemas/ProjectRole"
+    CreateInvitationRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+          example: teammate@example.com
+        role:
+          $ref: "#/components/schemas/ProjectRole"
+    CreateTaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          maxLength: 200
+          example: Design the pricing page
+        description:
+          type: string
+          maxLength: 5000
+          example: Three tiers, annual toggle
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        priority:
+          $ref: "#/components/schemas/TaskPriority"
+        dueDate:
+          type: string
+          description: A date (2026-10-15) or an ISO timestamp
+          example: "2026-10-15"
+        assignedToId:
+          type: string
+          format: uuid
+          description: Must be a member of the project
+          example: 9b2c1f4e-3a7d-4e8b-b6c5-1d2e3f4a5b6c
+    UpdateTaskRequest:
+      type: object
+      description: Send at least one field. null clears `description`, `dueDate` or `assignedToId`.
+      properties:
+        title:
+          type: string
+          maxLength: 200
+          example: Design the pricing page v2
+        description:
+          type: string
+          nullable: true
+          maxLength: 5000
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        priority:
+          $ref: "#/components/schemas/TaskPriority"
+        dueDate:
+          type: string
+          nullable: true
+          example: "2026-10-20"
+        assignedToId:
+          type: string
+          format: uuid
+          nullable: true
+          example: null
+    CreateSubtaskRequest:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          maxLength: 200
+          example: Draft copy for each tier
+    UpdateSubtaskRequest:
+      type: object
+      description: Send at least one field. Members may only send `isCompleted`.
+      properties:
+        title:
+          type: string
+          maxLength: 200
+          example: Draft and review copy
+        isCompleted:
+          type: boolean
+          example: true
+    ContentRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          maxLength: 5000
+          example: Can we add a FAQ section below the tiers?

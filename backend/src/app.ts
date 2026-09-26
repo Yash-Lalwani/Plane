@@ -1,8 +1,11 @@
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import express from "express";
+import { readFileSync } from "node:fs";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
+import swaggerUi from "swagger-ui-express";
+import { parse } from "yaml";
 import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
 import { errorHandler, notFound } from "./middlewares/error.middleware.js";
@@ -25,6 +28,12 @@ app.use(
     redact: ["req.headers.authorization", "req.headers.cookie"],
   }),
 );
+
+// Resolved from this file, so it works from both src/ (dev) and dist/ (production).
+const openApiSpec = parse(
+  readFileSync(new URL("../docs/openapi.yaml", import.meta.url), "utf8"),
+) as swaggerUi.JsonObject;
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
 app.use("/api/v1", router);
 
