@@ -29,15 +29,27 @@ export const uploadFile = (
   });
 
 // Cloudinary stores images and PDFs as "image" and other files (like plain text) as "raw",
-// and destroy() only finds a file when given the matching type.
+// and destroy() only finds a file when given the matching type. Without a MIME type
+// (avatars) the file is an image.
+const resourceTypeFor = (mimeType?: string): "image" | "raw" => {
+  if (
+    !mimeType ||
+    mimeType.startsWith("image/") ||
+    mimeType === "application/pdf"
+  ) {
+    return "image";
+  }
+  return "raw";
+};
+
 // Failures are logged, not thrown: a leftover file must not fail the user's request.
 export const deleteFile = async (
   publicId: string,
-  resourceType: "image" | "raw" = "image",
+  mimeType?: string,
 ): Promise<void> => {
   try {
     await cloudinary.uploader.destroy(publicId, {
-      resource_type: resourceType,
+      resource_type: resourceTypeFor(mimeType),
     });
   } catch (error) {
     logger.warn(
