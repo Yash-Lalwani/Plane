@@ -1,4 +1,5 @@
 import type { ErrorRequestHandler, RequestHandler, Response } from "express";
+import multer from "multer";
 import { ZodError } from "zod";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
@@ -59,6 +60,15 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
       sendError(res, err, 404, "Resource not found");
       return;
     }
+  }
+
+  if (err instanceof multer.MulterError) {
+    if (err.code === "LIMIT_FILE_SIZE") {
+      sendError(res, err, 413, "File is too large");
+      return;
+    }
+    sendError(res, err, 400, err.message);
+    return;
   }
 
   if (isExpressHttpError(err)) {
