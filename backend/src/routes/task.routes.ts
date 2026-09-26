@@ -17,6 +17,7 @@ import {
   updateTaskSchema,
 } from "../validators/task.validator.js";
 import { attachmentRouter } from "./attachment.routes.js";
+import { commentRouter } from "./comment.routes.js";
 import { subtaskRouter } from "./subtask.routes.js";
 
 // Mounted at /projects/:projectId/tasks.
@@ -55,3 +56,4 @@ taskRouter.delete(
 
 taskRouter.use("/:taskId/attachments", attachmentRouter);
 taskRouter.use("/:taskId/subtasks", subtaskRouter);
+taskRouter.use("/:taskId/comments", commentRouter);
