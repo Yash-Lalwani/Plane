@@ -169,8 +169,7 @@ The API and the worker are two Railway services built from this repository with 
 1. Create a Railway project, and add **PostgreSQL** and **Redis** to it.
 2. Add a service from this GitHub repository for the **API**:
    - **Root directory:** `backend`. Railway builds `backend/Dockerfile`.
-   - **Pre-deploy command:** `npm run db:deploy`
-   - **Start command:** `node dist/server.js`
+   - **Start command:** leave it empty. The image's default command applies pending migrations (`prisma migrate deploy`) and then starts the server, so every deploy migrates the database automatically. If a migration fails, the server doesn't start and the deploy fails.
    - Generate a public domain for it.
 3. Add a second service from the same repository for the **worker**:
    - **Root directory:** `backend`
@@ -192,7 +191,7 @@ The API and the worker are two Railway services built from this repository with 
    DATABASE_URL="<Railway Postgres public URL>" npm run db:seed
    ```
 
-The start commands run Node directly rather than through `npm start` or `npm run worker`. Railway sends `SIGTERM` on redeploys. When npm is the main process it doesn't pass that signal on properly, so the worker would be killed before it could finish its current job and close cleanly.
+Both services end up running Node directly rather than through `npm start` or `npm run worker`. The API's default command `exec`s into Node after migrating, and the worker's start command is `node` itself. Railway sends `SIGTERM` on redeploys. When npm is the main process it doesn't pass that signal on properly, so the worker would be killed before it could finish its current job and close cleanly.
 
 If Redis connections time out over Railway's private network, append `?family=0` to `REDIS_URL`. That lets `ioredis` connect over IPv6.
 

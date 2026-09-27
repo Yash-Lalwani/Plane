@@ -31,5 +31,8 @@ COPY docs ./docs
 
 USER node
 EXPOSE 8000
-# Node runs directly (not through npm) so it receives SIGTERM itself and can shut down cleanly.
-CMD ["node", "dist/server.js"]
+# The default command is the API: apply pending migrations, then start the server. If a
+# migration fails, the server never starts, so a broken deploy fails visibly.
+# exec replaces the shell with Node, so Node receives SIGTERM itself and can shut down cleanly.
+# The worker overrides this command with `node dist/workers/email.worker.js`.
+CMD ["sh", "-c", "npm run db:deploy && exec node dist/server.js"]

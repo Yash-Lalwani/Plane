@@ -37,8 +37,7 @@ services:
     environment:
       DATABASE_URL: postgresql://plane:plane@postgres:5432/plane
       REDIS_URL: redis://redis:6379
-    # exec replaces the shell, so Node is the main process and receives SIGTERM directly.
-    command: sh -c "npm run db:deploy && exec node dist/server.js"
+    # No command: the image's default command applies migrations, then starts the API.
     ports:
       - "8000:8000"
     depends_on:
