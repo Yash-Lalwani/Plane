@@ -67,9 +67,17 @@ describe("comments", () => {
   describe("GET /comments", () => {
     it("lists comments oldest first with pagination", async () => {
       const { admin, task, agent, url } = await setup();
-      for (const content of ["First", "Second", "Third"]) {
+      // Explicit, 1-second-apart timestamps: rows created in a quick loop can share a
+      // millisecond, which would make the order depend on the random id tiebreaker.
+      const start = Date.now();
+      for (const [index, content] of ["First", "Second", "Third"].entries()) {
         await prisma.comment.create({
-          data: { taskId: task.id, authorId: admin.id, content },
+          data: {
+            taskId: task.id,
+            authorId: admin.id,
+            content,
+            createdAt: new Date(start + index * 1000),
+          },
         });
       }
 

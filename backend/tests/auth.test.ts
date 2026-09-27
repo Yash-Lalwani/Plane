@@ -362,9 +362,27 @@ describe("auth", () => {
   });
 });
 
-describe("auth cookie domain", () => {
+describe("auth cookie attributes", () => {
   afterEach(() => {
     env.COOKIE_DOMAIN = undefined;
+    env.NODE_ENV = "test";
+  });
+
+  it("uses Secure and SameSite=Lax in production", async () => {
+    env.NODE_ENV = "production";
+    const user = await createUser();
+
+    const login = await request(app)
+      .post(`${AUTH}/login`)
+      .send({ email: user.email, password: TEST_PASSWORD });
+
+    const cookies = login.headers["set-cookie"] as unknown as string[];
+    expect(cookies).toHaveLength(2);
+    for (const cookie of cookies) {
+      expect(cookie).toContain("HttpOnly");
+      expect(cookie).toContain("Secure");
+      expect(cookie).toContain("SameSite=Lax");
+    }
   });
 
   it("sets and clears the cookies on COOKIE_DOMAIN when it is configured", async () => {
