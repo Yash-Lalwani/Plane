@@ -18,6 +18,8 @@ const envSchema = z
 
     CLIENT_URL: z.url(),
     CORS_ORIGIN: z.url(),
+    // Optional. Empty means host-only cookies (always the case locally).
+    COOKIE_DOMAIN: z.string().optional(),
 
     ACCESS_TOKEN_SECRET: z.string().min(1),
     ACCESS_TOKEN_EXPIRY: z.string().min(1).default("15m"),

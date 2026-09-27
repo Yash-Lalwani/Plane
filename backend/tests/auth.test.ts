@@ -1,7 +1,8 @@
 import request from "supertest";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { app } from "../src/app.js";
 import { prisma } from "../src/config/db.js";
+import { env } from "../src/config/env.js";
 import { addEmailJob } from "../src/queues/email.queue.js";
 import { hashToken } from "../src/utils/tokens.js";
 import { createUser, loginAs, TEST_PASSWORD } from "./helpers/auth.js";
@@ -358,5 +359,44 @@ describe("auth", () => {
         .send({ oldPassword: TEST_PASSWORD, newPassword: "new-password-123" })
         .expect(401);
     });
+  });
+});
+
+describe("auth cookie domain", () => {
+  afterEach(() => {
+    env.COOKIE_DOMAIN = undefined;
+  });
+
+  it("sets and clears the cookies on COOKIE_DOMAIN when it is configured", async () => {
+    env.COOKIE_DOMAIN = ".plane.example.test";
+    const user = await createUser();
+
+    const login = await request(app)
+      .post(`${AUTH}/login`)
+      .send({ email: user.email, password: TEST_PASSWORD });
+    const logout = await request(app)
+      .post(`${AUTH}/logout`)
+      .set("Authorization", `Bearer ${login.body.data.accessToken}`);
+
+    for (const res of [login, logout]) {
+      const cookies = res.headers["set-cookie"] as unknown as string[];
+      expect(cookies).toHaveLength(2);
+      expect(
+        cookies.every((cookie) =>
+          cookie.includes("Domain=.plane.example.test"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("uses host-only cookies when COOKIE_DOMAIN is not set", async () => {
+    const user = await createUser();
+
+    const login = await request(app)
+      .post(`${AUTH}/login`)
+      .send({ email: user.email, password: TEST_PASSWORD });
+
+    const cookies = login.headers["set-cookie"] as unknown as string[];
+    expect(cookies.some((cookie) => cookie.includes("Domain="))).toBe(false);
   });
 });

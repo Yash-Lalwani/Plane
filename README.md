@@ -4,7 +4,7 @@ Plane is a REST API for collaborative project management. Teams organize work in
 
 This is the backend. A frontend will be added later in `frontend/`.
 
-**API docs:** Swagger UI is served at `/api-docs` (locally: http://localhost:8000/api-docs).
+**Live API:** https://api.plane.yashlalwani.info/api/v1 · **API docs:** https://api.plane.yashlalwani.info/api-docs (locally: http://localhost:8000/api-docs)
 
 ## Features
 
@@ -183,7 +183,8 @@ The API and the worker are two Railway services built from this repository with 
    - `ACCESS_TOKEN_EXPIRY=15m` and `REFRESH_TOKEN_EXPIRY=7d`
    - `RESEND_API_KEY`, which is required in production, and `EMAIL_FROM`. The default `onboarding@resend.dev` sender only delivers to your own Resend account address; to email other people, verify a domain in Resend.
    - `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET`
-   - `CLIENT_URL` and `CORS_ORIGIN`: set both to the frontend URL once it exists. Until then, use the API's public URL.
+   - `CLIENT_URL` and `CORS_ORIGIN`: the frontend URL, for example `https://plane.yashlalwani.info`. `CLIENT_URL` is used in email links, and `CORS_ORIGIN` is the only origin browsers may call the API from.
+   - `COOKIE_DOMAIN`: the parent domain shared by the frontend and API, with a leading dot, for example `.plane.yashlalwani.info`. The auth cookies are then valid on both subdomains. Leave it unset to keep them on the API host only.
 5. Run the seed once against the production database from your machine, using the Postgres **public** connection URL from Railway:
 
    ```bash
