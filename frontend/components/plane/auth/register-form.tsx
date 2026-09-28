@@ -10,6 +10,7 @@ import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AuthLayout, FormMessage } from "@/components/plane/auth-layout";
+import { DemoAccountNotice } from "./demo-account-notice";
 import { errorMessage } from "@/lib/api";
 import { applyFieldErrors } from "@/lib/format";
 import { useLogin, useRegister } from "@/lib/queries";
@@ -67,7 +68,11 @@ export function RegisterForm({ returnTo, email }: { returnTo: string; email?: st
   const loginHref = returnTo === "/projects" ? "/login" : `/login?returnTo=${encodeURIComponent(returnTo)}`;
 
   return (
-    <AuthLayout title="Make room for great work." description="Your next great project starts right here.">
+    <AuthLayout
+      title="Make room for great work."
+      description="Your next great project starts right here."
+      notice={<DemoAccountNotice loginHref={loginHref} />}
+    >
       <form onSubmit={onSubmit} noValidate>
         <label className="form-field">
           <span>Full name <span className="text-slate-400">(optional)</span></span>

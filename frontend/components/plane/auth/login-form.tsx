@@ -10,6 +10,7 @@ import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AuthLayout, FormMessage } from "@/components/plane/auth-layout";
+import { DEMO_EMAIL, DEMO_PASSWORD, DemoAccountNotice } from "./demo-account-notice";
 import { errorMessage } from "@/lib/api";
 import { useLogin } from "@/lib/queries";
 
@@ -38,11 +39,15 @@ export function LoginForm({ returnTo }: { returnTo: string }) {
   const registerHref = returnTo === "/projects" ? "/register" : `/register?returnTo=${encodeURIComponent(returnTo)}`;
 
   return (
-    <AuthLayout title="Welcome back." description="Your projects, your people, your next step.">
+    <AuthLayout
+      title="Welcome back."
+      description="Your projects, your people, your next step."
+      notice={<DemoAccountNotice />}
+    >
       <form onSubmit={onSubmit} noValidate>
         <label className="form-field">
           Email address
-          <Input type="email" autoComplete="email" placeholder="you@example.com" {...form.register("email")} />
+          <Input type="email" autoComplete="email" placeholder={DEMO_EMAIL} {...form.register("email")} />
           {form.formState.errors.email && <span className="form-error">{form.formState.errors.email.message}</span>}
         </label>
         <label className="form-field">
@@ -50,7 +55,7 @@ export function LoginForm({ returnTo }: { returnTo: string }) {
           <Input
             type="password"
             autoComplete="current-password"
-            placeholder="Your password"
+            placeholder={DEMO_PASSWORD}
             {...form.register("password")}
           />
           {form.formState.errors.password && (

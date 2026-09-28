@@ -7,11 +7,13 @@ export function AuthLayout({
   icon,
   title,
   description,
+  notice,
   children,
 }: {
   icon?: React.ReactNode;
   title: string;
   description?: React.ReactNode;
+  notice?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -19,6 +21,7 @@ export function AuthLayout({
       <section className="auth-main">
         <Brand />
         <div className="auth-card">
+          {notice}
           {icon && <div className="token-icon">{icon}</div>}
           <h1>{title}</h1>
           {description && <p className="auth-description">{description}</p>}
