@@ -10,3 +10,6 @@ backend/src/generated/
 CLAUDE.md
 PRD.md
 FRONTEND_GUIDE.md
+
+# Local design-linter config
+.impeccable/
