@@ -10,8 +10,8 @@ import { validate } from "../middlewares/validate.middleware.js";
 import {
   commentBodySchema,
   commentParamsSchema,
-  listCommentsQuerySchema,
 } from "../validators/comment.validator.js";
+import { paginationQuerySchema } from "../utils/pagination.js";
 import { taskParamsSchema } from "../validators/task.validator.js";
 
 // Mounted at /projects/:projectId/tasks/:taskId/comments. Every route is open to any member;
@@ -20,7 +20,7 @@ export const commentRouter = Router({ mergeParams: true });
 
 commentRouter.get(
   "/",
-  validate({ params: taskParamsSchema, query: listCommentsQuerySchema }),
+  validate({ params: taskParamsSchema, query: paginationQuerySchema }),
   requireProjectRole(),
   listComments,
 );

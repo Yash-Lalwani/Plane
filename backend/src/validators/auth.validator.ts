@@ -12,7 +12,7 @@ export const usernameSchema = z
   .regex(/^[a-z0-9_]+$/, "Only letters, numbers and underscores are allowed");
 
 // bcrypt ignores everything after 72 bytes, so longer passwords are rejected.
-export const passwordSchema = z.string().min(8).max(72);
+const passwordSchema = z.string().min(8).max(72);
 
 export const fullNameSchema = z.string().trim().min(1).max(100);
 

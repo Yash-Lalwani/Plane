@@ -3,7 +3,7 @@ import { logger } from "../config/logger.js";
 import type { Prisma } from "../generated/prisma/client.js";
 
 // The actions recorded in the activity feed (PRD 3.11).
-export type ActivityAction =
+type ActivityAction =
   | "project.created"
   | "project.updated"
   | "member.joined"

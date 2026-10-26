@@ -15,7 +15,7 @@ import {
 } from "../middlewares/auth.middleware.js";
 import { requireProjectRole } from "../middlewares/project-role.middleware.js";
 import { validate } from "../middlewares/validate.middleware.js";
-import { listActivityQuerySchema } from "../validators/activity.validator.js";
+import { paginationQuerySchema } from "../utils/pagination.js";
 import {
   createProjectSchema,
   projectParamsSchema,
@@ -60,7 +60,7 @@ projectRouter.get(
 );
 projectRouter.get(
   "/:projectId/activity",
-  validate({ params: projectParamsSchema, query: listActivityQuerySchema }),
+  validate({ params: projectParamsSchema, query: paginationQuerySchema }),
   requireProjectRole(),
   listActivity,
 );

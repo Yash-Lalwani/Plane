@@ -4,7 +4,7 @@ import type { EmailContent } from "../utils/email-templates.js";
 
 export type EmailJob = EmailContent & { to: string };
 
-export const emailQueue = new Queue<EmailJob>("email", {
+const emailQueue = new Queue<EmailJob>("email", {
   connection: redis,
   defaultJobOptions: {
     attempts: 3,

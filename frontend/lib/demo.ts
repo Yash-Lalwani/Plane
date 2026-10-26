@@ -1,16 +1,14 @@
 // Static sample data for the landing page's product illustration only. The app itself uses the API.
-export type Status = "TODO" | "IN_PROGRESS" | "DONE";
+import type { TaskPriority, TaskStatus } from "./types";
 
 export type SampleTask = {
   id: string;
   title: string;
-  status: Status;
-  priority: "LOW" | "MEDIUM" | "HIGH";
+  status: TaskStatus;
+  priority: TaskPriority;
   person: string;
   due: string;
 };
-
-export const statusLabels = { TODO: "To do", IN_PROGRESS: "In progress", DONE: "Done" };
 
 export const initialTasks: SampleTask[] = (
   [

@@ -9,7 +9,7 @@ import { getTokenExpiry } from "./tokens.js";
 // COOKIE_DOMAIN (e.g. ".plane.yashlalwani.info") makes the cookies valid on every subdomain
 // instead of only the API host. clearAuthCookies uses the same options, so logout
 // clears exactly the cookies that login set.
-export const cookieOptions = (): CookieOptions => ({
+const cookieOptions = (): CookieOptions => ({
   httpOnly: true,
   secure: env.NODE_ENV === "production",
   sameSite: "lax",

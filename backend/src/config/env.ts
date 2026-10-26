@@ -1,7 +1,11 @@
-import dotenv from "dotenv";
+import { existsSync } from "node:fs";
 import { z } from "zod";
 
-dotenv.config({ quiet: true });
+// Local development reads backend/.env. Docker, CI and Railway set real environment
+// variables instead, and those always win over values in the file.
+if (existsSync(".env")) {
+  process.loadEnvFile();
+}
 
 const envSchema = z
   .object({

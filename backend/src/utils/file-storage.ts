@@ -1,7 +1,7 @@
 import { cloudinary } from "../config/cloudinary.js";
 import { logger } from "../config/logger.js";
 
-export type StoredFile = {
+type StoredFile = {
   url: string;
   publicId: string;
 };

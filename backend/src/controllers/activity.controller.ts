@@ -1,9 +1,12 @@
 import type { Request, Response } from "express";
 import { prisma } from "../config/db.js";
 import { ApiResponse } from "../utils/api-response.js";
-import { buildPaginatedData, getSkipTake } from "../utils/pagination.js";
+import {
+  buildPaginatedData,
+  getSkipTake,
+  type PaginationQuery,
+} from "../utils/pagination.js";
 import { publicUserSelect } from "../utils/selects.js";
-import type { ListActivityQuery } from "../validators/activity.validator.js";
 import type { ProjectParams } from "../validators/project.validator.js";
 
 export const listActivity = async (
@@ -11,7 +14,7 @@ export const listActivity = async (
   res: Response,
 ): Promise<void> => {
   const { projectId } = req.params as ProjectParams;
-  const query = req.validatedQuery as ListActivityQuery;
+  const query = req.validatedQuery as PaginationQuery;
 
   const where = { projectId };
   const [activities, total] = await Promise.all([

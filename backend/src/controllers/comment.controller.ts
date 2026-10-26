@@ -4,12 +4,15 @@ import { ProjectRole } from "../generated/prisma/client.js";
 import { ApiError } from "../utils/api-error.js";
 import { ApiResponse } from "../utils/api-response.js";
 import { findTaskOrThrow } from "../utils/find-task.js";
-import { buildPaginatedData, getSkipTake } from "../utils/pagination.js";
+import {
+  buildPaginatedData,
+  getSkipTake,
+  type PaginationQuery,
+} from "../utils/pagination.js";
 import { publicUserSelect } from "../utils/selects.js";
 import type {
   CommentBody,
   CommentParams,
-  ListCommentsQuery,
 } from "../validators/comment.validator.js";
 import type { TaskParams } from "../validators/task.validator.js";
 
@@ -34,7 +37,7 @@ export const listComments = async (
   res: Response,
 ): Promise<void> => {
   const { projectId, taskId } = req.params as TaskParams;
-  const query = req.validatedQuery as ListCommentsQuery;
+  const query = req.validatedQuery as PaginationQuery;
 
   const task = await findTaskOrThrow(projectId, taskId);
   const where = { taskId: task.id };

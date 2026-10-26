@@ -1,7 +1,9 @@
-import dotenv from "dotenv";
+import { existsSync } from "node:fs";
 import { defineConfig } from "prisma/config";
 
-dotenv.config({ quiet: true });
+if (existsSync(".env")) {
+  process.loadEnvFile();
+}
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
