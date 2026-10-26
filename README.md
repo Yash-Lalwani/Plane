@@ -1,8 +1,6 @@
-
-
-https://github.com/user-attachments/assets/196324da-4ca0-4595-a021-bb526c06ccac
-
 # Plane | Production-Grade Project Management System with RBAC, Redis Caching, and Background Job Processing
+
+https://github.com/user-attachments/assets/2b67edb1-6955-46c1-b1ae-9308c1f85837
 
 Plane is a REST API where teams organize work into projects, with tasks, comments, notes and invitations controlled by per-project roles.
 
