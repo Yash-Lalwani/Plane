@@ -13,3 +13,6 @@ FRONTEND_GUIDE.md
 
 # Local design-linter config
 .impeccable/
+
+brag-output/
+.archify/
