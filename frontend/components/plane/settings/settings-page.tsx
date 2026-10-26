@@ -6,7 +6,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { CheckCircle2, Mail, Upload } from "lucide-react";
-import { AppShell } from "@/components/plane/app-shell";
 import { UserAvatar } from "@/components/plane/user-avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,11 +21,7 @@ import {
 import type { User } from "@/lib/types";
 
 export function SettingsPage() {
-  return (
-    <AppShell section="settings" requireVerified={false} header={<strong>Settings</strong>}>
-      <SettingsContent />
-    </AppShell>
-  );
+  return <SettingsContent />;
 }
 
 function SettingsContent() {

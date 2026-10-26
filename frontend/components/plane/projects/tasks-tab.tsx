@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, LayoutGrid, List, Plus, Search } from "lucide-react";
 import { UserAvatar } from "@/components/plane/user-avatar";
+import { ContentLoading } from "@/components/plane/workspace-loading";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -10,8 +12,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { errorMessage } from "@/lib/api";
+import { useProgressiveCount } from "@/hooks/use-progressive-count";
 import { canManageTasks, displayName, priorityLabels, statusLabels } from "@/lib/format";
-import { useMembers, useTasks } from "@/lib/queries";
+import { initialTaskFilters, useMembers, useTasks } from "@/lib/queries";
 import {
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -22,12 +25,12 @@ import {
   type TaskStatus,
 } from "@/lib/types";
 import { DueDate, PriorityBadge, StatusIcon } from "./task-bits";
-import { TaskFormDialog } from "./task-form-dialog";
-import { TaskSheet } from "./task-sheet";
+const TaskFormDialog = dynamic(() => import("./task-form-dialog").then((module) => module.TaskFormDialog));
+const TaskSheet = dynamic(() => import("./task-sheet").then((module) => module.TaskSheet));
 
 // Radix Select can't use "" as a value, so "no filter" is "ALL".
 const ALL = "ALL";
-const PAGE_SIZE = 20;
+const PAGE_SIZE = initialTaskFilters.limit!;
 const BOARD_LIMIT = 100; // the API's maximum page size
 
 const SORTS = {
@@ -42,8 +45,8 @@ type SortKey = keyof typeof SORTS;
 
 export function TasksTab({ projectId, role }: { projectId: string; role: ProjectRole }) {
   const members = useMembers(projectId);
-  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [searchReset, setSearchReset] = useState(0);
   const [status, setStatus] = useState<string>(ALL);
   const [priority, setPriority] = useState<string>(ALL);
   const [assignee, setAssignee] = useState<string>(ALL);
@@ -52,16 +55,24 @@ export function TasksTab({ projectId, role }: { projectId: string; role: Project
   const [view, setView] = useState<"list" | "board">("list");
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createLoaded, setCreateLoaded] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [sheetLoaded, setSheetLoaded] = useState(false);
 
-  // Search once typing pauses, instead of on every keystroke.
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearch(searchInput.trim());
-      setPage(1);
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [searchInput]);
+  const onSearch = useCallback((value: string) => {
+    setSearch(value);
+    setPage(1);
+  }, []);
+
+  function openCreate() {
+    setCreateLoaded(true);
+    setCreateOpen(true);
+  }
+
+  function openTask(taskId: string) {
+    setSheetLoaded(true);
+    setSelectedTaskId(taskId);
+  }
 
   const filters: TaskFilters = {
     status: status === ALL ? undefined : (status as TaskStatus),
@@ -86,7 +97,7 @@ export function TasksTab({ projectId, role }: { projectId: string; role: Project
 
   const hasFilters = status !== ALL || priority !== ALL || assignee !== ALL || overdue || search !== "";
   function clearFilters() {
-    setSearchInput("");
+    setSearchReset((value) => value + 1);
     setSearch("");
     setStatus(ALL);
     setPriority(ALL);
@@ -101,16 +112,7 @@ export function TasksTab({ projectId, role }: { projectId: string; role: Project
   return (
     <>
       <div className="workspace-controls">
-        <div className="task-search">
-          <Search />
-          <Input
-            aria-label="Search tasks"
-            placeholder="Search tasks…"
-            value={searchInput}
-            maxLength={200}
-            onChange={(event) => setSearchInput(event.target.value)}
-          />
-        </div>
+        <TaskSearch key={searchReset} onSearch={onSearch} />
         <FilterSelect
           label="Status"
           value={status}
@@ -162,14 +164,14 @@ export function TasksTab({ projectId, role }: { projectId: string; role: Project
           </TabsList>
         </Tabs>
         {canManageTasks(role) && (
-          <Button className="bg-[#287eb2] hover:bg-[#216a97]" onClick={() => setCreateOpen(true)}>
+          <Button className="bg-[#287eb2] hover:bg-[#216a97]" onClick={openCreate}>
             <Plus size={15} />
             New task
           </Button>
         )}
       </div>
 
-      {tasks.isPending && <p className="text-sm text-slate-400">Loading tasks…</p>}
+      {tasks.isPending && <ContentLoading />}
       {tasks.isError && <p className="form-error">{errorMessage(tasks.error)}</p>}
 
       {tasks.data && items.length === 0 && pagination && pagination.total > 0 && (
@@ -199,7 +201,7 @@ export function TasksTab({ projectId, role }: { projectId: string; role: Project
             </Button>
           ) : (
             canManageTasks(role) && (
-              <Button className="mt-5" onClick={() => setCreateOpen(true)}>
+              <Button className="mt-5" onClick={openCreate}>
                 <Plus size={15} />
                 New task
               </Button>
@@ -225,7 +227,7 @@ export function TasksTab({ projectId, role }: { projectId: string; role: Project
                 {items.map((task) => (
                   <TableRow key={task.id}>
                     <TableCell>
-                      <button className="task-title-button" onClick={() => setSelectedTaskId(task.id)}>
+                      <button className="task-title-button" onClick={() => openTask(task.id)}>
                         {task.title}
                       </button>
                     </TableCell>
@@ -284,46 +286,84 @@ export function TasksTab({ projectId, role }: { projectId: string; role: Project
             </p>
           )}
           <div className="task-board">
-            {TASK_STATUSES.map((column) => {
-              const columnTasks = items.filter((task) => task.status === column);
-              return (
-                <div className="task-board-column" key={column}>
-                  <div className="task-board-heading">
-                    <StatusIcon status={column} />
-                    {statusLabels[column]}
-                    <span>{columnTasks.length}</span>
-                  </div>
-                  {columnTasks.map((task) => (
-                    <button className="workspace-task-card" key={task.id} onClick={() => setSelectedTaskId(task.id)}>
-                      <DueDate dueDate={task.dueDate} status={task.status} />
-                      <strong>{task.title}</strong>
-                      <div>
-                        <PriorityBadge priority={task.priority} />
-                        {task.assignedTo && <UserAvatar user={task.assignedTo} small />}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              );
-            })}
+            {TASK_STATUSES.map((column) => (
+              <BoardColumn
+                key={column}
+                status={column}
+                tasks={items.filter((task) => task.status === column)}
+                onOpenTask={openTask}
+              />
+            ))}
           </div>
         </>
       )}
 
-      <TaskFormDialog
-        projectId={projectId}
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        members={members.data ?? []}
-        onCreated={setSelectedTaskId}
-      />
-      <TaskSheet
-        projectId={projectId}
-        role={role}
-        taskId={selectedTaskId}
-        onClose={() => setSelectedTaskId(null)}
-      />
+      {createLoaded && (
+        <TaskFormDialog
+          projectId={projectId}
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          members={members.data ?? []}
+          onCreated={openTask}
+        />
+      )}
+      {sheetLoaded && (
+        <TaskSheet
+          projectId={projectId}
+          role={role}
+          taskId={selectedTaskId}
+          onClose={() => setSelectedTaskId(null)}
+        />
+      )}
     </>
+  );
+}
+
+function BoardColumn({ status, tasks, onOpenTask }: { status: TaskStatus; tasks: Task[]; onOpenTask: (id: string) => void }) {
+  const { visible, sentinel, showMore } = useProgressiveCount(tasks.length);
+  return (
+    <div className="task-board-column">
+      <div className="task-board-heading">
+        <StatusIcon status={status} />
+        {statusLabels[status]}
+        <span>{tasks.length}</span>
+      </div>
+      {tasks.slice(0, visible).map((task) => (
+        <button className="workspace-task-card" key={task.id} onClick={() => onOpenTask(task.id)}>
+          <DueDate dueDate={task.dueDate} status={task.status} />
+          <strong>{task.title}</strong>
+          <div>
+            <PriorityBadge priority={task.priority} />
+            {task.assignedTo && <UserAvatar user={task.assignedTo} small />}
+          </div>
+        </button>
+      ))}
+      {visible < tasks.length && (
+        <div ref={sentinel} className="h-px">
+          <button className="sr-only" onClick={showMore}>Load more {statusLabels[status]} tasks</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskSearch({ onSearch }: { onSearch: (value: string) => void }) {
+  const [value, setValue] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => onSearch(value.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [value, onSearch]);
+  return (
+    <div className="task-search">
+      <Search />
+      <Input
+        aria-label="Search tasks"
+        placeholder="Search tasks…"
+        value={value}
+        maxLength={200}
+        onChange={(event) => setValue(event.target.value)}
+      />
+    </div>
   );
 }
 

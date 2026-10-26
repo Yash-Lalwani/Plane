@@ -1,19 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Activity, ChevronRight, FileText, FolderX, Home, LayoutGrid, MoreHorizontal, Pencil, Trash2, Users } from "lucide-react";
-import { AppShell } from "@/components/plane/app-shell";
+import { Activity, FileText, FolderX, Home, LayoutGrid, MoreHorizontal, Pencil, Trash2, Users } from "lucide-react";
 import { ConfirmDialog } from "@/components/plane/confirm-dialog";
-import { ActivityTab } from "@/components/plane/projects/activity-tab";
-import { InviteDialog, MembersTab } from "@/components/plane/projects/members-tab";
-import { NotesTab } from "@/components/plane/projects/notes-tab";
 import { OverviewTab } from "@/components/plane/projects/overview-tab";
-import { ProjectFormDialog } from "@/components/plane/projects/project-form-dialog";
 import { TasksTab } from "@/components/plane/projects/tasks-tab";
 import { UserAvatar } from "@/components/plane/user-avatar";
+import { ContentLoading } from "@/components/plane/workspace-loading";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -27,6 +24,12 @@ import { canManageProject, roleLabels } from "@/lib/format";
 import { type ProjectTab } from "@/lib/project-tabs";
 import { useDeleteProject, useMembers, useProject } from "@/lib/queries";
 
+const ActivityTab = dynamic(() => import("./activity-tab").then((module) => module.ActivityTab));
+const MembersTab = dynamic(() => import("./members-tab").then((module) => module.MembersTab));
+const InviteDialog = dynamic(() => import("./members-tab").then((module) => module.InviteDialog));
+const NotesTab = dynamic(() => import("./notes-tab").then((module) => module.NotesTab));
+const ProjectFormDialog = dynamic(() => import("./project-form-dialog").then((module) => module.ProjectFormDialog));
+
 const PROJECT_TABS: { id: ProjectTab; label: string; icon: typeof Home }[] = [
   { id: "overview", label: "Overview", icon: Home },
   { id: "tasks", label: "Tasks", icon: LayoutGrid },
@@ -36,27 +39,7 @@ const PROJECT_TABS: { id: ProjectTab; label: string; icon: typeof Home }[] = [
 ];
 
 export function ProjectWorkspace({ projectId, initialTab }: { projectId: string; initialTab: ProjectTab }) {
-  return (
-    <AppShell section="project" activeProjectId={projectId} header={<ProjectBreadcrumb projectId={projectId} />}>
-      <ProjectContent projectId={projectId} initialTab={initialTab} />
-    </AppShell>
-  );
-}
-
-function ProjectBreadcrumb({ projectId }: { projectId: string }) {
-  const project = useProject(projectId);
-  return (
-    <>
-      <Link href="/projects">Projects</Link>
-      <ChevronRight size={12} />
-      {project.data && (
-        <>
-          <span className="project-mark">{project.data.name.trim()[0]?.toUpperCase() ?? "P"}</span>
-          <strong className="truncate">{project.data.name}</strong>
-        </>
-      )}
-    </>
-  );
+  return <ProjectContent projectId={projectId} initialTab={initialTab} />;
 }
 
 function ProjectContent({ projectId, initialTab }: { projectId: string; initialTab: ProjectTab }) {
@@ -66,15 +49,27 @@ function ProjectContent({ projectId, initialTab }: { projectId: string; initialT
   const deleteProject = useDeleteProject(projectId);
   const [tab, setTab] = useState<ProjectTab>(initialTab);
   const [editOpen, setEditOpen] = useState(false);
+  const [editLoaded, setEditLoaded] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteLoaded, setInviteLoaded] = useState(false);
+
+  function openInvite() {
+    setInviteLoaded(true);
+    setInviteOpen(true);
+  }
+
+  function openEdit() {
+    setEditLoaded(true);
+    setEditOpen(true);
+  }
 
   function changeTab(next: string) {
     setTab(next as ProjectTab);
     window.history.replaceState(null, "", `/projects/${projectId}?tab=${next}`);
   }
 
-  if (project.isPending) return <p className="text-sm text-slate-400">Loading project…</p>;
+  if (project.isPending) return <ContentLoading />;
 
   if (project.isError) {
     const notFound = project.error instanceof ApiError && project.error.status === 404;
@@ -112,7 +107,7 @@ function ProjectContent({ projectId, initialTab }: { projectId: string; initialT
             ))}
           </div>
           {isAdmin && (
-            <Button variant="outline" size="sm" onClick={() => setInviteOpen(true)}>
+            <Button variant="outline" size="sm" onClick={openInvite}>
               <Users size={14} />
               Invite
             </Button>
@@ -125,7 +120,7 @@ function ProjectContent({ projectId, initialTab }: { projectId: string; initialT
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setEditOpen(true)}>
+                <DropdownMenuItem onSelect={openEdit}>
                   <Pencil size={14} /> Edit project
                 </DropdownMenuItem>
                 <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
@@ -152,12 +147,12 @@ function ProjectContent({ projectId, initialTab }: { projectId: string; initialT
       {tab === "tasks" && <TasksTab projectId={projectId} role={data.role} />}
       {tab === "notes" && <NotesTab projectId={projectId} role={data.role} />}
       {tab === "members" && (
-        <MembersTab projectId={projectId} role={data.role} onInvite={() => setInviteOpen(true)} />
+        <MembersTab projectId={projectId} role={data.role} onInvite={openInvite} />
       )}
       {tab === "activity" && <ActivityTab projectId={projectId} />}
 
-      <ProjectFormDialog open={editOpen} onOpenChange={setEditOpen} project={data} />
-      <InviteDialog projectId={projectId} open={inviteOpen} onOpenChange={setInviteOpen} />
+      {editLoaded && <ProjectFormDialog open={editOpen} onOpenChange={setEditOpen} project={data} />}
+      {inviteLoaded && <InviteDialog projectId={projectId} open={inviteOpen} onOpenChange={setInviteOpen} />}
       <ConfirmDialog
         open={deleteOpen}
         onOpenChange={setDeleteOpen}

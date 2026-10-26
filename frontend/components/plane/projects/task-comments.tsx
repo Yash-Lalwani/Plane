@@ -39,10 +39,13 @@ export function CommentList({
   function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     const text = content.trim();
-    if (!text) return;
+    if (!text || create.isPending) return;
+    setContent("");
     create.mutate(text, {
-      onSuccess: () => setContent(""),
-      onError: (error) => toast.error(errorMessage(error)),
+      onError: (error) => {
+        setContent((draft) => draft || text);
+        toast.error(errorMessage(error));
+      },
     });
   }
 
@@ -64,6 +67,12 @@ export function CommentList({
           canDelete={comment.authorId === currentUser.data?.id || canManageProject(role)}
         />
       ))}
+      {create.isPending && (
+        <div className="detail-comment" aria-live="polite">
+          <p className="whitespace-pre-line break-words">{create.variables}</p>
+          <small className="text-slate-400">Sending…</small>
+        </div>
+      )}
       {comments.hasNextPage && (
         <Button
           variant="ghost"

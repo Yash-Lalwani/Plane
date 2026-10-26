@@ -48,6 +48,59 @@ export const keys = {
   invitationPreview: (token: string) => ["invitationPreview", token] as const,
 };
 
+export const initialTaskFilters: TaskFilters = { sortBy: "createdAt", order: "desc", page: 1, limit: 20 };
+
+export const projectListOptions = () => ({
+  queryKey: keys.projectList,
+  queryFn: () => api<Project[]>("/projects"),
+});
+
+export const projectOptions = (projectId: string) => ({
+  queryKey: keys.project(projectId),
+  queryFn: () => api<Project>(`/projects/${projectId}`),
+});
+
+export const membersOptions = (projectId: string) => ({
+  queryKey: keys.members(projectId),
+  queryFn: () => api<Member[]>(`/projects/${projectId}/members`),
+});
+
+export const dashboardOptions = (projectId: string) => ({
+  queryKey: keys.dashboard(projectId),
+  queryFn: () => api<Dashboard>(`/projects/${projectId}/dashboard`),
+});
+
+export const taskListOptions = (projectId: string, filters: TaskFilters) => ({
+  queryKey: keys.taskList(projectId, filters),
+  queryFn: () =>
+    api<Paginated<Task>>(`/projects/${projectId}/tasks`, {
+      query: {
+        status: filters.status,
+        priority: filters.priority,
+        assignedTo: filters.assignedTo,
+        overdue: filters.overdue ? "true" : undefined,
+        search: filters.search?.trim() || undefined,
+        sortBy: filters.sortBy,
+        order: filters.order,
+        page: filters.page,
+        limit: filters.limit,
+      },
+    }),
+});
+
+export const notesOptions = (projectId: string) => ({
+  queryKey: keys.notes(projectId),
+  queryFn: () => api<Note[]>(`/projects/${projectId}/notes`),
+});
+
+export const activityOptions = (projectId: string) => ({
+  queryKey: keys.activity(projectId),
+  queryFn: ({ pageParam }: { pageParam: number }) =>
+    api<Paginated<Activity>>(`/projects/${projectId}/activity`, { query: { page: pageParam, limit: 20 } }),
+  initialPageParam: 1,
+  getNextPageParam: nextPage,
+});
+
 const nextPage = (last: Paginated<unknown>) =>
   last.pagination.page < last.pagination.totalPages ? last.pagination.page + 1 : undefined;
 
@@ -161,17 +214,13 @@ export function useUploadAvatar() {
 
 export function useProjects(enabled = true) {
   return useQuery({
-    queryKey: keys.projectList,
-    queryFn: () => api<Project[]>("/projects"),
+    ...projectListOptions(),
     enabled,
   });
 }
 
 export function useProject(projectId: string) {
-  return useQuery({
-    queryKey: keys.project(projectId),
-    queryFn: () => api<Project>(`/projects/${projectId}`),
-  });
+  return useQuery(projectOptions(projectId));
 }
 
 export function useCreateProject() {
@@ -208,29 +257,17 @@ export function useDeleteProject(projectId: string) {
 }
 
 export function useDashboard(projectId: string) {
-  return useQuery({
-    queryKey: keys.dashboard(projectId),
-    queryFn: () => api<Dashboard>(`/projects/${projectId}/dashboard`),
-  });
+  return useQuery(dashboardOptions(projectId));
 }
 
 export function useActivity(projectId: string) {
-  return useInfiniteQuery({
-    queryKey: keys.activity(projectId),
-    queryFn: ({ pageParam }) =>
-      api<Paginated<Activity>>(`/projects/${projectId}/activity`, { query: { page: pageParam, limit: 20 } }),
-    initialPageParam: 1,
-    getNextPageParam: nextPage,
-  });
+  return useInfiniteQuery(activityOptions(projectId));
 }
 
 // ---------------------------------------------------------------- members and invitations
 
 export function useMembers(projectId: string) {
-  return useQuery({
-    queryKey: keys.members(projectId),
-    queryFn: () => api<Member[]>(`/projects/${projectId}/members`),
-  });
+  return useQuery(membersOptions(projectId));
 }
 
 // Member changes affect the member list, counts, dashboard, activity and task assignees.
@@ -308,21 +345,7 @@ export function useAcceptInvitation() {
 
 export function useTasks(projectId: string, filters: TaskFilters) {
   return useQuery({
-    queryKey: keys.taskList(projectId, filters),
-    queryFn: () =>
-      api<Paginated<Task>>(`/projects/${projectId}/tasks`, {
-        query: {
-          status: filters.status,
-          priority: filters.priority,
-          assignedTo: filters.assignedTo,
-          overdue: filters.overdue ? "true" : undefined,
-          search: filters.search?.trim() || undefined,
-          sortBy: filters.sortBy,
-          order: filters.order,
-          page: filters.page,
-          limit: filters.limit,
-        },
-      }),
+    ...taskListOptions(projectId, filters),
     placeholderData: (previous) => previous,
   });
 }
@@ -353,13 +376,44 @@ export function useCreateTask(projectId: string) {
 
 export function useUpdateTask(projectId: string, taskId: string) {
   const queryClient = useQueryClient();
+  const listKey = [...keys.tasks(projectId), "list"] as const;
   return useMutation({
     mutationFn: (input: TaskInput) =>
       api<TaskDetail>(`/projects/${projectId}/tasks/${taskId}`, { method: "PATCH", body: input }),
+    onMutate: async (input) => {
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: keys.task(projectId, taskId) }),
+        queryClient.cancelQueries({ queryKey: listKey }),
+      ]);
+      const previousTask = queryClient.getQueryData<TaskDetail>(keys.task(projectId, taskId));
+      const previousLists = queryClient.getQueriesData<Paginated<Task>>({ queryKey: listKey });
+      const members = queryClient.getQueryData<Member[]>(keys.members(projectId));
+      const patchTask = <T extends Task>(task: T): T => {
+        if (task.id !== taskId) return task;
+        const assignedTo = input.assignedToId === undefined
+          ? task.assignedTo
+          : input.assignedToId === null
+            ? null
+            : members?.find((member) => member.user.id === input.assignedToId)?.user ?? task.assignedTo;
+        return { ...task, ...input, assignedTo } as T;
+      };
+      if (previousTask) queryClient.setQueryData(keys.task(projectId, taskId), patchTask(previousTask));
+      queryClient.setQueriesData<Paginated<Task>>({ queryKey: listKey }, (data) =>
+        data ? { ...data, items: data.items.map(patchTask) } : data,
+      );
+      return { previousTask, previousLists };
+    },
+    onError: (_error, _input, context) => {
+      if (context?.previousTask) queryClient.setQueryData(keys.task(projectId, taskId), context.previousTask);
+      for (const [key, data] of context?.previousLists ?? []) queryClient.setQueryData(key, data);
+    },
     onSuccess: (task) => {
       queryClient.setQueryData(keys.task(projectId, taskId), task);
-      invalidateTaskData(queryClient, projectId);
+      queryClient.setQueriesData<Paginated<Task>>({ queryKey: listKey }, (data) =>
+        data ? { ...data, items: data.items.map((item) => item.id === taskId ? task : item) } : data,
+      );
     },
+    onSettled: () => invalidateTaskData(queryClient, projectId),
   });
 }
 
@@ -391,14 +445,31 @@ export function useCreateSubtask(projectId: string, taskId: string) {
 }
 
 export function useUpdateSubtask(projectId: string, taskId: string) {
-  const invalidate = useInvalidateTask(projectId, taskId);
+  const queryClient = useQueryClient();
+  const taskKey = keys.task(projectId, taskId);
   return useMutation({
     mutationFn: ({ subtaskId, ...input }: { subtaskId: string; title?: string; isCompleted?: boolean }) =>
       api<Subtask>(`/projects/${projectId}/tasks/${taskId}/subtasks/${subtaskId}`, {
         method: "PATCH",
         body: input,
       }),
-    onSuccess: invalidate,
+    onMutate: async ({ subtaskId, ...input }) => {
+      await queryClient.cancelQueries({ queryKey: taskKey });
+      const previous = queryClient.getQueryData<TaskDetail>(taskKey);
+      queryClient.setQueryData<TaskDetail>(taskKey, (task) => task && ({
+        ...task,
+        subtasks: task.subtasks.map((subtask) => subtask.id === subtaskId ? { ...subtask, ...input } : subtask),
+      }));
+      return previous;
+    },
+    onError: (_error, _input, previous) => {
+      if (previous) queryClient.setQueryData(taskKey, previous);
+    },
+    onSuccess: (updated) => queryClient.setQueryData<TaskDetail>(taskKey, (task) => task && ({
+      ...task,
+      subtasks: task.subtasks.map((subtask) => subtask.id === updated.id ? updated : subtask),
+    })),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: taskKey }),
   });
 }
 
@@ -491,10 +562,7 @@ export function useDeleteComment(projectId: string, taskId: string) {
 // ---------------------------------------------------------------- notes
 
 export function useNotes(projectId: string) {
-  return useQuery({
-    queryKey: keys.notes(projectId),
-    queryFn: () => api<Note[]>(`/projects/${projectId}/notes`),
-  });
+  return useQuery(notesOptions(projectId));
 }
 
 function useInvalidateNotes(projectId: string) {

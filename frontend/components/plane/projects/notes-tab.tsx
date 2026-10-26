@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { errorMessage } from "@/lib/api";
+import { useProgressiveCount } from "@/hooks/use-progressive-count";
 import { canManageProject, displayName, timeAgo } from "@/lib/format";
 import { useCreateNote, useDeleteNote, useNotes, useUpdateNote } from "@/lib/queries";
 import type { Note, ProjectRole } from "@/lib/types";
@@ -23,6 +24,7 @@ export function NotesTab({ projectId, role }: { projectId: string; role: Project
   const isAdmin = canManageProject(role);
   // null = closed, "new" = creating, a note = viewing or editing it.
   const [open, setOpen] = useState<Note | "new" | null>(null);
+  const { visible, sentinel, showMore } = useProgressiveCount(notes.data?.length ?? 0);
 
   return (
     <>
@@ -48,7 +50,7 @@ export function NotesTab({ projectId, role }: { projectId: string; role: Project
 
       {notes.data && notes.data.length > 0 && (
         <div className="notes-grid">
-          {notes.data.map((note) => {
+          {notes.data.slice(0, visible).map((note) => {
             const { heading, body } = splitNote(note.content);
             return (
               <button className="workspace-note" key={note.id} onClick={() => setOpen(note)}>
@@ -61,6 +63,11 @@ export function NotesTab({ projectId, role }: { projectId: string; role: Project
               </button>
             );
           })}
+          {visible < notes.data.length && (
+            <div ref={sentinel} className="h-px">
+              <button className="sr-only" onClick={showMore}>Load more notes</button>
+            </div>
+          )}
         </div>
       )}
 

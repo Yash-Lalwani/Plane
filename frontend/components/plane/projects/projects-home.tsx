@@ -1,27 +1,31 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useState } from "react";
 import { FolderKanban, Plus, Users } from "lucide-react";
-import { AppShell } from "@/components/plane/app-shell";
-import { ProjectFormDialog } from "@/components/plane/projects/project-form-dialog";
 import { UserAvatar } from "@/components/plane/user-avatar";
+import { ContentLoading } from "@/components/plane/workspace-loading";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/api";
 import { displayName, roleLabels } from "@/lib/format";
 import { useProjects } from "@/lib/queries";
 
+const ProjectFormDialog = dynamic(() => import("./project-form-dialog").then((module) => module.ProjectFormDialog));
+
 export function ProjectsHome() {
-  return (
-    <AppShell section="projects" header={<strong>All projects</strong>}>
-      <ProjectsList />
-    </AppShell>
-  );
+  return <ProjectsList />;
 }
 
 function ProjectsList() {
   const projects = useProjects();
   const [createOpen, setCreateOpen] = useState(false);
+  const [createLoaded, setCreateLoaded] = useState(false);
+
+  function openCreate() {
+    setCreateLoaded(true);
+    setCreateOpen(true);
+  }
 
   return (
     <>
@@ -30,13 +34,13 @@ function ProjectsList() {
           <h1>Your projects</h1>
           <p>Every project you belong to, with your role in it.</p>
         </div>
-        <Button className="bg-[#287eb2] hover:bg-[#216a97]" onClick={() => setCreateOpen(true)}>
+        <Button className="bg-[#287eb2] hover:bg-[#216a97]" onClick={openCreate}>
           <Plus size={15} />
           New project
         </Button>
       </div>
 
-      {projects.isPending && <p className="text-sm text-slate-400">Loading projects…</p>}
+      {projects.isPending && <ContentLoading />}
       {projects.isError && <p className="form-error">{errorMessage(projects.error)}</p>}
 
       {projects.data && projects.data.length === 0 && (
@@ -44,7 +48,7 @@ function ProjectsList() {
           <FolderKanban size={25} />
           <strong>No projects yet</strong>
           <p>Create your first project, or accept an invitation from a teammate.</p>
-          <Button className="mt-5" onClick={() => setCreateOpen(true)}>
+          <Button className="mt-5" onClick={openCreate}>
             <Plus size={15} />
             Create a project
           </Button>
@@ -72,7 +76,7 @@ function ProjectsList() {
         </div>
       )}
 
-      <ProjectFormDialog open={createOpen} onOpenChange={setCreateOpen} />
+      {createLoaded && <ProjectFormDialog open={createOpen} onOpenChange={setCreateOpen} />}
     </>
   );
 }

@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import dynamic from "next/dynamic";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronsUpDown, FolderKanban, LogOut, Mail, Plus, RefreshCw, Settings } from "lucide-react";
+import { ChevronRight, ChevronsUpDown, FolderKanban, LogOut, Mail, Plus, RefreshCw, Settings } from "lucide-react";
 import { Brand } from "@/components/plane/brand";
 import { UserAvatar } from "@/components/plane/user-avatar";
-import { ProjectFormDialog } from "@/components/plane/projects/project-form-dialog";
+import { ShellLoading } from "@/components/plane/workspace-loading";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -30,28 +32,48 @@ import {
 } from "@/components/ui/sidebar";
 import { ApiError, errorMessage } from "@/lib/api";
 import { displayName } from "@/lib/format";
-import { useCurrentUser, useLogout, useProjects, useResendVerification } from "@/lib/queries";
+import {
+  activityOptions,
+  dashboardOptions,
+  initialTaskFilters,
+  membersOptions,
+  notesOptions,
+  projectListOptions,
+  projectOptions,
+  taskListOptions,
+  useCurrentUser,
+  useLogout,
+  useProject,
+  useProjects,
+  useResendVerification,
+} from "@/lib/queries";
 import type { User } from "@/lib/types";
 
 type Section = "projects" | "settings" | "project";
+const ProjectFormDialog = dynamic(() => import("@/components/plane/projects/project-form-dialog").then((module) => module.ProjectFormDialog));
 
 // Signed-in frame: checks the session, gates unverified users, and shows the sidebar.
-export function AppShell({
-  section,
-  activeProjectId,
-  requireVerified = true,
-  header,
-  children,
-}: {
-  section: Section;
-  activeProjectId?: string;
-  requireVerified?: boolean;
-  header?: React.ReactNode;
-  children: React.ReactNode;
-}) {
+export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const activeProjectId = pathname.match(/^\/projects\/([^/]+)$/)?.[1];
+  const section: Section = pathname === "/settings" ? "settings" : activeProjectId ? "project" : "projects";
+  const queryClient = useQueryClient();
   const currentUser = useCurrentUser();
 
-  if (currentUser.isPending) return <FullPageMessage>Loading your workspace…</FullPageMessage>;
+  useEffect(() => {
+    // Start independent requests alongside the session check. The API still enforces access.
+    void queryClient.prefetchQuery(projectListOptions());
+    if (!activeProjectId) return;
+    void queryClient.prefetchQuery(projectOptions(activeProjectId));
+    void queryClient.prefetchQuery(membersOptions(activeProjectId));
+    const tab = new URLSearchParams(window.location.search).get("tab") ?? "tasks";
+    if (tab === "overview") void queryClient.prefetchQuery(dashboardOptions(activeProjectId));
+    if (tab === "tasks") void queryClient.prefetchQuery(taskListOptions(activeProjectId, initialTaskFilters));
+    if (tab === "notes") void queryClient.prefetchQuery(notesOptions(activeProjectId));
+    if (tab === "activity") void queryClient.prefetchInfiniteQuery(activityOptions(activeProjectId));
+  }, [activeProjectId, queryClient]);
+
+  if (currentUser.isPending) return <ShellLoading />;
 
   if (currentUser.isError) {
     // A 401 is handled globally (redirect to login); anything else is shown here.
@@ -69,7 +91,8 @@ export function AppShell({
   }
 
   const user = currentUser.data;
-  const gated = requireVerified && !user.isEmailVerified;
+  const gated = section !== "settings" && !user.isEmailVerified;
+  const header = section === "settings" ? <strong>Settings</strong> : activeProjectId ? <ProjectBreadcrumb projectId={activeProjectId} /> : <strong>All projects</strong>;
 
   return (
     <div className="workspace-root">
@@ -93,11 +116,33 @@ export function AppShell({
   );
 }
 
+function ProjectBreadcrumb({ projectId }: { projectId: string }) {
+  const project = useProject(projectId);
+  return (
+    <>
+      <Link href="/projects">Projects</Link>
+      <ChevronRight size={12} />
+      {project.data && (
+        <>
+          <span className="project-mark">{project.data.name.trim()[0]?.toUpperCase() ?? "P"}</span>
+          <strong className="truncate">{project.data.name}</strong>
+        </>
+      )}
+    </>
+  );
+}
+
 function AppSidebar({ user, section, activeProjectId }: { user: User; section: Section; activeProjectId?: string }) {
   const router = useRouter();
   const projects = useProjects(user.isEmailVerified);
   const logout = useLogout();
   const [createOpen, setCreateOpen] = useState(false);
+  const [createLoaded, setCreateLoaded] = useState(false);
+
+  function openCreate() {
+    setCreateLoaded(true);
+    setCreateOpen(true);
+  }
 
   async function onLogout() {
     await logout.mutateAsync().catch(() => undefined);
@@ -151,7 +196,7 @@ function AppSidebar({ user, section, activeProjectId }: { user: User; section: S
                 {projects.isPending && <p className="px-4 text-xs text-slate-400">Loading projects…</p>}
                 {projects.isError && <p className="px-4 text-xs text-slate-400">Couldn’t load projects.</p>}
                 <SidebarMenuItem>
-                  <SidebarMenuButton className="workspace-sidebar-button" onClick={() => setCreateOpen(true)}>
+                  <SidebarMenuButton className="workspace-sidebar-button" onClick={openCreate}>
                     <Plus size={16} />
                     New project
                   </SidebarMenuButton>
@@ -185,7 +230,7 @@ function AppSidebar({ user, section, activeProjectId }: { user: User; section: S
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarFooter>
-      <ProjectFormDialog open={createOpen} onOpenChange={setCreateOpen} />
+      {createLoaded && <ProjectFormDialog open={createOpen} onOpenChange={setCreateOpen} />}
     </Sidebar>
   );
 }
