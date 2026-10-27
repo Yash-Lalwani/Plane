@@ -16,3 +16,7 @@ FRONTEND_GUIDE.md
 
 brag-output/
 .archify/
+
+# Generated architecture diagrams
+/Plane-archify-*.html
+/Plane-architecture-diagram.html
